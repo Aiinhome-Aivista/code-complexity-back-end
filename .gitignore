@@ -1,0 +1,7 @@
+__pycache__
+chroma_store
+graphs
+uploads
+config.py
+requirements.txt
+venv
