@@ -1,6 +1,5 @@
 
 import os
-from controllers.heatmap import code_risk_heatmap
 from models import db
 from flask_cors import CORS
 from urllib.parse import quote_plus
@@ -11,7 +10,12 @@ from controllers import insight_controller
 from controllers import analysis_controller
 from flask import Flask, send_from_directory
 from controllers import visualization_controller
+from controllers.heatmap import code_risk_heatmap
 from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER 
+from controllers.download_controller import download_updated_code
+from controllers.relationship_controller import get_relationship_flow
+# from controllers.analysis_controller import get_project_dependencies
+
 
 app = Flask(__name__)
 CORS(app)
@@ -42,13 +46,6 @@ VIZ_URL = '/api/visualization'
 
 # # --- STATIC FILE SERVING ---
 # # 1. Serve Uploaded Files
-# @app.route('/uploads/<path:filename>')
-# def serve_uploaded_files(filename):
-#     return send_from_directory(UPLOAD_FOLDER, filename)
-
-#     # ... (All your existing code and routes are above here) ...
-
-# # --- PASTE THE NEW CODE HERE ---
 @app.route('/uploads/<user_id>/<session_id>/extracted/<path:filename>')
 def serve_extracted_file(user_id, session_id, filename):
     # Base directory for this session's extracted files
@@ -105,7 +102,7 @@ def get_results(project_id):
 def get_user_projects(): 
     return project_controller.get_user_projects()
 
-@app.route(PROJECT_URL + '/<int:project_id>', methods=['DELETE'])
+@app.route(PROJECT_URL + '/delete/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id): 
     return project_controller.delete_project(project_id)
 
@@ -127,6 +124,23 @@ def analyze_project_ai():
 @app.route(ANALYSIS_URL + "/code_heatmap", methods=["POST"])
 def code_risk_heatmap_controller():
     return code_risk_heatmap()
+
+
+
+# --- DEPENDENCY GRAPH ROUTE ---
+# @app.route(ANALYSIS_URL + '/dependency_graph', methods=['POST'])
+# def dependency_graph_route():
+#     return get_project_dependencies()
+
+# --- DOWNLOAD ROUTE ---
+@app.route(ANALYSIS_URL + '/download_updated_code', methods=['GET'])
+def download_code_route():
+    return download_updated_code()
+
+
+@app.route(ANALYSIS_URL + "/relationships_flow", methods=["POST"])
+def get_relationship_flow_controller():
+    return get_relationship_flow()
 
 
 

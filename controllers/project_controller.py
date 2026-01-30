@@ -217,7 +217,7 @@ def get_results(project_id):
 
 
     return api_response("Fetched", {
-        "fileTree": file_tree,
+        # "fileTree": file_tree,
         "graph_url": graph_url,
         "insights": insights,
         "relationships": relationships,

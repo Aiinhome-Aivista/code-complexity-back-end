@@ -86,8 +86,73 @@ def store_graph_data(session_id, files_data, relationships):
         print(f" ArangoDB Store Error: {e}")
         return False
 
-def generate_graph_html(session_id, output_path):
-    """ Generates Interactive Graph HTML file using Pyvis """
+# def generate_graph_html(session_id, output_path):
+#     """ Generates Interactive Graph HTML file using Pyvis """
+#     try:
+#         db = get_db()
+#         v_col_name = f"files_{session_id}"
+#         e_col_name = f"edges_{session_id}"
+        
+#         if not db.has_collection(v_col_name): return False
+
+#         # Initialize Network with UTF-8 support context
+#         net = Network(height="750px", width="100%", bgcolor="#0b1120", font_color="white", cdn_resources='in_line')
+        
+#         # Add Nodes
+#         cursor_nodes = db.aql.execute(f"FOR doc IN `{v_col_name}` RETURN doc")
+#         for node in cursor_nodes:
+#             color = "#97c2fc"
+#             grp = (node.get('folder') or 'root').lower()
+#             if 'controller' in grp: color = "#10b981"
+#             elif 'model' in grp: color = "#f472b6"
+#             elif 'db' in grp: color = "#3b82f6"
+#             elif 'view' in grp: color = "#a855f7"
+            
+#             net.add_node(
+#                 node["_key"], 
+#                 label=node.get("label", "?"), 
+#                 title=f"File: {node.get('filename')}\nLines: {node.get('lines', 0)}", 
+#                 color=color, shape='dot', size=20 + (node.get('risk', 0) / 5)
+#             )
+
+#         # Add Edges
+#         if db.has_collection(e_col_name):
+#             cursor_edges = db.aql.execute(f"FOR doc IN `{e_col_name}` RETURN doc")
+#             for edge in cursor_edges:
+#                 src = edge["_from"].split('/')[1]
+#                 tgt = edge["_to"].split('/')[1]
+#                 net.add_edge(src, tgt, color="#555555", arrows="to")
+
+#         net.set_options("""
+#         var options = {
+#           "physics": {
+#             "forceAtlas2Based": { "gravitationalConstant": -50, "springLength": 100 },
+#             "minVelocity": 0.75, "solver": "forceAtlas2Based"
+#           }
+#         }
+#         """)
+
+#         # FIX: Explicit UTF-8 encoding to prevent charmap error on Windows
+#         os.makedirs(os.path.dirname(output_path), exist_ok=True)
+#         html_content = net.generate_html()
+#         with open(output_path, "w", encoding="utf-8") as f:
+#             f.write(html_content)
+            
+#         print(f"✅ Graph HTML saved: {output_path}")
+#         return True
+#     except Exception as e:
+#         print(f"❌ Graph Generation Failed: {e}")
+#         import traceback
+#         traceback.print_exc()
+#         return False
+# --- REPLACE WITH THIS UPDATED FUNCTION ---
+# --- UPDATE THIS FUNCTION IN services/arango_service.py ---
+
+def generate_graph_html(session_id, output_path, bg_color="#9CA3AF"):
+    """ 
+    Generates Interactive Graph HTML.
+    REMOVED: filter_menu=True
+    """
     try:
         db = get_db()
         v_col_name = f"files_{session_id}"
@@ -95,18 +160,31 @@ def generate_graph_html(session_id, output_path):
         
         if not db.has_collection(v_col_name): return False
 
-        # Initialize Network with UTF-8 support context
-        net = Network(height="750px", width="100%", bgcolor="#0b1120", font_color="white", cdn_resources='in_line')
+        # Determine font color
+        font_color = "black" 
+        # Uncomment if you switch back to dark mode
+        # if bg_color.startswith("#0") or "black" in bg_color: font_color = "white"
+
+        # Initialize Network - FILTER MENU REMOVED
+        net = Network(
+            height="100vh",     
+            width="100%",       
+            bgcolor=bg_color,   
+            font_color=font_color, 
+            cdn_resources='in_line',
+            select_menu=True,   # Keeps the search box (useful)
+            filter_menu=False   # <--- DISABLED THIS
+        )
         
         # Add Nodes
         cursor_nodes = db.aql.execute(f"FOR doc IN `{v_col_name}` RETURN doc")
         for node in cursor_nodes:
-            color = "#97c2fc"
+            color = "#2563EB"
             grp = (node.get('folder') or 'root').lower()
-            if 'controller' in grp: color = "#10b981"
-            elif 'model' in grp: color = "#f472b6"
-            elif 'db' in grp: color = "#3b82f6"
-            elif 'view' in grp: color = "#a855f7"
+            if 'controller' in grp: color = "#059669"
+            elif 'model' in grp: color = "#DB2777"
+            elif 'db' in grp: color = "#2563EB"
+            elif 'view' in grp: color = "#7C3AED"
             
             net.add_node(
                 node["_key"], 
@@ -121,8 +199,9 @@ def generate_graph_html(session_id, output_path):
             for edge in cursor_edges:
                 src = edge["_from"].split('/')[1]
                 tgt = edge["_to"].split('/')[1]
-                net.add_edge(src, tgt, color="#555555", arrows="to")
+                net.add_edge(src, tgt, color="#374151", arrows="to")
 
+        # Physics Configuration
         net.set_options("""
         var options = {
           "physics": {
@@ -132,20 +211,19 @@ def generate_graph_html(session_id, output_path):
         }
         """)
 
-        # FIX: Explicit UTF-8 encoding to prevent charmap error on Windows
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         html_content = net.generate_html()
+        
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html_content)
             
-        print(f"✅ Graph HTML saved: {output_path}")
+        print(f"✅ Graph HTML saved (No Filter): {output_path}")
         return True
     except Exception as e:
         print(f"❌ Graph Generation Failed: {e}")
         import traceback
         traceback.print_exc()
         return False
-
 def get_graph_from_arango(session_id):
     try:
         db = get_db()

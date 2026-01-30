@@ -85,6 +85,8 @@ class Upload(db.Model):
     files = db.Column(db.JSON)
     insights = db.Column(db.JSON)
     relationships = db.Column(db.JSON)
+    heatmap = db.Column(db.JSON)
+    analyze_data = db.Column(db.JSON) 
 
 
     created_at = db.Column(db.DateTime, default=db.func.now())

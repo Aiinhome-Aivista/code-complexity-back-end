@@ -193,8 +193,10 @@ def code_risk_heatmap():
         project = Project.query.get(project_id)
         if not project:
             return api_response("Invalid project_id", None, 404)
+
         if project.session_id != session_id:
             return api_response("Session mismatch with project", None, 400)
+
         upload = Upload.query.filter_by(
             project_id=project_id,
             session_id=session_id
@@ -203,11 +205,36 @@ def code_risk_heatmap():
         if not upload:
             return api_response("Upload not found", None, 404)
 
+        # ==================================================
+        # 🔥 NEW: CHECK EXISTING HEATMAP IN DB (CACHE)
+        # ==================================================
+        if upload.heatmap:
+            print(f"[HEATMAP] Cached heatmap found for project_id={project_id}, session_id={session_id}")
+
+            project.heatmap_status = "DONE"
+            db.session.commit()
+
+            return api_response(
+                "AI Heatmap (Cached)",
+                upload.heatmap,
+                200
+            )
+
+        # ==================================================
+        # 🔥 HEATMAP ANALYSIS STARTED (only if not cached)
+        # ==================================================
+        project.heatmap_status = "PENDING"
+        db.session.commit()
+
         files = upload.files or []
         heatmap_files = []
 
+        # ===============================
+        # FILE LOOP (ONLY CALCULATION)
+        # ===============================
         for f in files:
             cache_key = f"{project_id}:{session_id}:{metric}:{f.get('filename')}"
+
             if cache_key in AI_HEATMAP_CACHE:
                 ai_result = AI_HEATMAP_CACHE[cache_key]
             else:
@@ -228,53 +255,36 @@ def code_risk_heatmap():
                 "lines": f.get("lines_of_code", 0)
             })
 
+        # ===============================
+        # BUILD HEATMAP JSON
+        # ===============================
+        heatmap_data = {
+            "metric": metric,
+            "legend": {
+                "safe": "0-19",
+                "low": "20-39",
+                "moderate": "40-59",
+                "high": "60-79",
+                "critical": "80-100"
+            },
+            "files": heatmap_files
+        }
 
-
+        # ===============================
+        # SAVE TO DB
+        # ===============================
+        upload.heatmap = heatmap_data
+        project.heatmap_status = "DONE"
+        db.session.commit()
 
         return api_response(
             "AI Heatmap Generated",
-            {
-                "metric": metric,
-                "legend": {
-                    "safe": "0-19",
-                    "low": "20-39",
-                    "moderate": "40-59",
-                    "high": "60-79",
-                    "critical": "80-100"
-                },
-                "files": heatmap_files
-            },
+            heatmap_data,
             200
         )
-
-
-
 
     except Exception as e:
         print("AI Heatmap Error:", e)
         return api_response("Internal Server Error", None, 500)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 

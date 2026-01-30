@@ -1,7 +1,4 @@
 
-
-
-
 import re
 import os
 import ast
@@ -20,10 +17,6 @@ from models import db, User, Project, FileAnalysis
 from services.ml_service import get_embedding_model
 from services.arango_service import store_graph_data, generate_graph_html
 from config import ACTIVE_LLM, BASE_URL, MISTRAL_API_KEY, MISTRAL_API_URL, MISTRAL_MODEL, UPLOAD_FOLDER, GRAPH_FOLDER, GEMINI_API_KEY, MODEL_NAME
-
-
-
-
 
 
 
@@ -64,8 +57,6 @@ class PythonAnalyzer:
                 tree = ast.parse(source.read())
             except:
                 return
-
-
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
@@ -318,6 +309,8 @@ def process_visualization_upload():
     if 'files' not in request.files: return api_response("No files", None, 400)
     user_id = request.form.get('user_id')
     user = db.session.get(User, user_id) if user_id else None
+    project_name = request.form.get('project_name')
+
     if not user: return api_response("User not found", None, 404)
    
     session_id = str(uuid.uuid4())
@@ -345,14 +338,15 @@ def process_visualization_upload():
 
     # FIX 1: Commit Project Immediately
     new_project = Project(
-    name=f"Session_{session_id[:8]}",
+    name=project_name or f"Session_{session_id[:8]}",
     user_id=user.id,
     session_id=session_id,
     code_health_status="PENDING",
     api_analysis_status="PENDING",
     visualization_status="PENDING",
     relationship_status="PENDING"
-)
+    ) 
+
 
 
     db.session.add(new_project)
@@ -570,7 +564,7 @@ def process_visualization_upload():
         codeHealth=code_health,
         files=files_data,
         insights=insights,
-        relationships=relationships
+        # relationships=relationships
     )
 
 
@@ -581,12 +575,12 @@ def process_visualization_upload():
     return api_response("Visualization Generated", {
     "project_id": new_project.id,
     "session_id": session_id,
-    "graph_url": graph_url,
-    "insights": insights,
-    "files": files_data,
-    "relationships": relationships,
-    "codeHealth": code_health,
-    "activeWarnings": active_warnings,
+    # "graph_url": graph_url,
+    # "insights": insights,
+    # "files": files_data,
+    # "relationships": relationships,
+    # "codeHealth": code_health,
+    # "activeWarnings": active_warnings,
     }, 200)
 
 
@@ -755,11 +749,6 @@ def generate_project_warnings(files_data):
     except Exception as e:
         print(f"❌ Warning Generation Error: {e}")
         return None
-
-
-
-
-
 
 
 
