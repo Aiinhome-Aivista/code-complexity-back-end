@@ -1,75 +1,3 @@
-# import os
-# import json
-# from flask import request
-# from config import BASE_URL, GRAPH_FOLDER
-# from utils.response import api_response
-# from models import db, Project, FileAnalysis
-# from services.arango_service import get_graph_from_arango
-# from models import Upload
-# from utils.response import api_response
-
-
-# def get_results(project_id):
-#     upload = (
-#         Upload.query
-#         .filter_by(project_id=project_id)
-#         .order_by(Upload.id.desc())
-#         .first()
-#     )
-
-
-#     if not upload:
-#         return api_response("No results found", None, 404)
-
-
-#     return api_response("Fetched", {
-#         "codeHealth": upload.codeHealth,
-#         "endpointHealth": upload.endpointHealth,
-#         # "files": upload.files,
-#         "insights": upload.insights,
-#         "relationships": upload.relationships,
-#         "graph_url": upload.graph_url
-#     }, 200)
-
-
-# def get_user_projects():
-#     user_id = request.args.get('user_id', type=int)
-
-
-#     if not user_id:
-#         return api_response("user_id required", None, 400)
-
-
-#     print("USER_ID =", user_id)
-
-
-#     projects = Project.query.filter(Project.user_id == user_id).all()
-#     print("FOUND =", len(projects))
-
-
-#     data = [{
-#         "id": p.id,
-#         "name": p.name,
-#         "session_id": p.session_id,
-#         "created_at": p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else None,
-#         "visualization_status": p.visualization_status,
-#         "code_health_status": p.code_health_status,
-#         "api_analysis_status": p.api_analysis_status,
-#         "relationship_status": p.relationship_status
-#     } for p in projects]
-
-
-#     return api_response("Fetched", data, 200)
-
-
-# def delete_project(project_id):
-#     project = db.session.get(Project, project_id)
-#     if project:
-#         db.session.delete(project)
-#         db.session.commit()
-#     return api_response("Deleted", None, 200)
-
-
 
 import os
 import json
@@ -88,6 +16,8 @@ if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
     except: pass
+
+
 
 
 def clean_path(path):
@@ -246,7 +176,8 @@ def get_user_projects():
             "code_health_status": p.code_health_status or "PENDING",
             "api_analysis_status": p.api_analysis_status or "PENDING",
             "relationship_status": p.relationship_status or "PENDING",
-            "heatmap_status": p.heatmap_status or "PENDING"
+            "heatmap_status": p.heatmap_status or "PENDING",
+            "files_analyzed": p.files_analyzed
         })
 
 

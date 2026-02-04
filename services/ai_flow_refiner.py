@@ -3,6 +3,7 @@ import requests
 from config import (
     ACTIVE_LLM,
     GEMINI_API_KEY,
+    MISTRAL_TIMEOUT,
     MODEL_NAME,
     MISTRAL_API_KEY,
     MISTRAL_MODEL,
@@ -72,12 +73,7 @@ FILES:
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_object"}
         }
-        resp = requests.post(
-            "https://api.mistral.ai/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=40
-        )
+        resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
         text = resp.json()["choices"][0]["message"]["content"]
 
     # ---------------- LOCAL MISTRAL ----------------
@@ -88,7 +84,7 @@ FILES:
             "stream": False,
             "format": "json"
         }
-        resp = requests.post(MISTRAL_API_URL, json=payload, timeout=40)
+        resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
         text = resp.json().get("response", "")
 
     else:

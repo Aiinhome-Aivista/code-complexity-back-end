@@ -1,4 +1,5 @@
 
+
 import re
 import os
 import ast
@@ -16,7 +17,11 @@ from utils.file_utils import handle_zip_upload
 from models import db, User, Project, FileAnalysis
 from services.ml_service import get_embedding_model
 from services.arango_service import store_graph_data, generate_graph_html
-from config import ACTIVE_LLM, BASE_URL, MISTRAL_API_KEY, MISTRAL_API_URL, MISTRAL_MODEL, UPLOAD_FOLDER, GRAPH_FOLDER, GEMINI_API_KEY, MODEL_NAME
+from config import ACTIVE_LLM, BASE_URL, MISTRAL_API_KEY, MISTRAL_API_URL, MISTRAL_MODEL, MISTRAL_TIMEOUT, UPLOAD_FOLDER, GRAPH_FOLDER, GEMINI_API_KEY, MODEL_NAME
+
+
+
+
 
 
 
@@ -31,9 +36,13 @@ def get_chroma_client():
     return _chroma_client
 
 
+
+
 client = None
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
+
+
 
 
 class PythonAnalyzer:
@@ -47,9 +56,13 @@ class PythonAnalyzer:
     }
 
 
+
+
     def analyze(self, file_path, relationships, file_list):
         filename = os.path.basename(file_path)
         file_list.add(filename)
+
+
 
 
         with open(file_path, "r", encoding="utf-8", errors="ignore") as source:
@@ -72,6 +85,8 @@ class PythonAnalyzer:
                         file_list.add(module)
 
 
+
+
 # --- REPLACE THIS FUNCTION ---
 def generate_internal_insights(files_data):
     try:
@@ -91,7 +106,11 @@ def generate_internal_insights(files_data):
         response_text = ""
 
 
+
+
         # --- 2. LOGIC BASED ON config.ACTIVE_LLM ---
+
+
 
 
         # === OPTION A: GEMINI ===
@@ -105,6 +124,9 @@ def generate_internal_insights(files_data):
                 contents=prompt
             )
             response_text = resp.text
+
+
+
 
 
 
@@ -132,6 +154,8 @@ def generate_internal_insights(files_data):
                 return [f"Mistral Error: {resp.status_code}"]
 
 
+
+
         # === OPTION C: MISTRAL LOCAL ===
         elif ACTIVE_LLM == "mistral_local":
             payload = {
@@ -141,7 +165,7 @@ def generate_internal_insights(files_data):
                 "format": "json"
             }
             try:
-                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=30)
+                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
                 if resp.status_code == 200:
                     response_text = resp.json().get('response', '')
                 else:
@@ -152,8 +176,12 @@ def generate_internal_insights(files_data):
                 return ["Local AI Unreachable."]
 
 
+
+
         else:
             return ["Invalid AI Configuration."]
+
+
 
 
         # --- 3. CLEAN & PARSE JSON ---
@@ -161,13 +189,38 @@ def generate_internal_insights(files_data):
         if not cleaned_text: return ["AI returned empty response."]
 
 
+
+
         data = json.loads(cleaned_text)
         return data.get('insights', ["No insights found in JSON."])
+
+
 
 
     except Exception as e:
         print(f"❌ Insights Generation Critical Error: {str(e)}") # <--- Now you will see the error in terminal
         return ["AI Analysis unavailable due to error."]
+
+
+def enhance_reason_impact(metric, reason, impact, score):
+    level = "strong" if score >= 4 else "moderate" if score >= 2.5 else "weak"
+
+
+    enhanced_reason = (
+        f"{reason} "
+        f"This suggests a {level} state for the {metric} aspect of the project, "
+        f"reflecting how consistently this concern is addressed across the codebase."
+    )
+
+
+    enhanced_impact = (
+        f"{impact} "
+        f"If left unaddressed, this may gradually affect maintainability, "
+        f"scalability, and long-term development velocity."
+    )
+
+
+    return enhanced_reason, enhanced_impact
 
 
 # --- NEW FUNCTION START: Paste this AFTER generate_internal_insights ---
@@ -190,12 +243,16 @@ def generate_health_explanations(files_data, ratings):
         top_complex_files = [f"{f['filename']} (Risk: {f['risk_score']})" for f in sorted_by_risk[:5]]
 
 
+
+
         for f in files_data:
             content = f.get('content', '')
             total_functions += content.count("def ")
             total_classes += content.count("class ")
             if "eval(" in content or "exec(" in content:
                 security_keywords_found.append(f['filename'])
+
+
 
 
         stats_summary = (
@@ -206,6 +263,8 @@ def generate_health_explanations(files_data, ratings):
         )
 
 
+
+
         # --- UPDATED PROMPT FOR DETAILED INSIGHTS ---
         prompt = f"""
         Analyze this Python project stats and scores.
@@ -214,11 +273,15 @@ def generate_health_explanations(files_data, ratings):
         SCORES: {json.dumps(ratings)}
 
 
+
+
         For EACH metric (modularity, performance, readability, reliability, security, sizeHealth), provide:
         1. reason: A 1-sentence explanation.
         2. suggestion: A specific, actionable recommendation to fix it.
         3. affected_files: List of 1-3 filenames that likely need attention.
         4. impact: Why this matters (1 sentence).
+
+
 
 
         Return ONLY a raw JSON object with keys:
@@ -238,6 +301,8 @@ def generate_health_explanations(files_data, ratings):
         response_text = ""
 
 
+
+
         # --- 2. LOGIC BASED ON config.ACTIVE_LLM (Same as before) ---
         if ACTIVE_LLM == "gemini":
             if not GEMINI_API_KEY: return {k: {"reason": "Gemini API Key missing"} for k in ratings}
@@ -246,6 +311,9 @@ def generate_health_explanations(files_data, ratings):
             contents=prompt
             )
             response_text = resp.text
+
+
+
 
 
 
@@ -262,17 +330,25 @@ def generate_health_explanations(files_data, ratings):
             else: return {k: {"reason": "AI Error"} for k in ratings}
 
 
+
+
         elif ACTIVE_LLM == "mistral_local":
             payload = {"model": "mistral", "prompt": prompt, "stream": False, "format": "json"}
             try:
-                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=30)
+                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
                 if resp.status_code == 200: response_text = resp.json().get('response', '')
                 else: return {k: {"reason": "Local AI Error"} for k in ratings}
             except: return {k: {"reason": "Local AI Unreachable"} for k in ratings}
 
 
+
+
         else:
             return {k: {"reason": "Invalid AI Config"} for k in ratings}
+
+
+
+
 
 
 
@@ -282,22 +358,40 @@ def generate_health_explanations(files_data, ratings):
         if not cleaned_text: return {k: {"reason": "Empty AI Response"} for k in ratings}
 
 
+
+
         parsed_data = json.loads(cleaned_text)
        
         # Safety Check to ensure structure
         final_data = {}
         for k in ratings.keys():
             item = parsed_data.get(k, {})
-            if isinstance(item, str): item = {"reason": item} # Handle simple string returns
+            if isinstance(item, str): item = {"reason": item} 
            
+            raw_reason = item.get("reason", "Analysis unavailable.")
+            raw_impact = item.get("impact", "Impact analysis pending.")
+
+
+            enh_reason, enh_impact = enhance_reason_impact(
+                metric=k,
+                reason=raw_reason,
+                impact=raw_impact,
+                score=ratings.get(k, 0)
+            )
+
+
             final_data[k] = {
-                "reason": item.get("reason", "Analysis unavailable."),
+                "reason": enh_reason,
                 "suggestion": item.get("suggestion", "No suggestion available."),
                 "affected_files": item.get("affected_files", []),
-                "impact": item.get("impact", "Impact analysis pending.")
+                "impact": enh_impact
             }
+
+
            
         return final_data
+
+
 
 
     except Exception as e:
@@ -305,11 +399,14 @@ def generate_health_explanations(files_data, ratings):
         return {k: {"reason": "Analysis failed."} for k in ratings}
 
 
+
+
 def process_visualization_upload():
     if 'files' not in request.files: return api_response("No files", None, 400)
     user_id = request.form.get('user_id')
     user = db.session.get(User, user_id) if user_id else None
     project_name = request.form.get('project_name')
+
 
     if not user: return api_response("User not found", None, 404)
    
@@ -320,6 +417,8 @@ def process_visualization_upload():
    
     os.makedirs(session_folder, exist_ok=True)
     os.makedirs(graph_folder, exist_ok=True)
+
+
 
 
     uploaded_files = request.files.getlist('files')
@@ -336,6 +435,8 @@ def process_visualization_upload():
             if f.filename: f.save(os.path.join(session_folder, secure_filename(f.filename)))
 
 
+
+
     # FIX 1: Commit Project Immediately
     new_project = Project(
     name=project_name or f"Session_{session_id[:8]}",
@@ -349,6 +450,9 @@ def process_visualization_upload():
 
 
 
+
+
+
     db.session.add(new_project)
     try:
         db.session.commit()
@@ -357,12 +461,16 @@ def process_visualization_upload():
         return api_response(f"Database Error: {str(e)}", None, 500)
 
 
+
+
     analyzer = PythonAnalyzer()
     relationships = []
     unique_nodes = set()
     files_data = []
     embedding_model = get_embedding_model()
     collection = get_chroma_client().get_or_create_collection(name=f"session_{session_id}")
+
+
 
 
     for root, dirs, files in os.walk(scan_path):
@@ -375,6 +483,8 @@ def process_visualization_upload():
             else: unique_nodes.add(filename)
 
 
+
+
             # Step B: Metadata & Database
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as fr: content = fr.read()
@@ -384,10 +494,16 @@ def process_visualization_upload():
                 if folder == '.': folder = "Root"
 
 
+
+
                 metrics = analyze_file_metrics(content, lines)
 
 
+
+
                 ext = os.path.splitext(filename)[1].lower()
+
+
 
 
                 files_data.append({
@@ -400,6 +516,8 @@ def process_visualization_upload():
                     "metrics": metrics,
                     "content": content      
                 })
+
+
 
 
                 # FIX 2: Commit Each File Individually to keep connection alive
@@ -417,6 +535,8 @@ def process_visualization_upload():
                 db.session.commit() # Commit per file
 
 
+
+
                 # Add to VectorDB
                 collection.add(documents=[content[:5000]], embeddings=[embedding_model.encode(content).tolist()], ids=[f"{session_id}_{filename}"])
             except Exception as e:
@@ -426,9 +546,15 @@ def process_visualization_upload():
 
 
 
+
+
+
+
     analyzed_filenames = [f["filename"] for f in files_data]
     print("ANALYZED_FILES =", analyzed_filenames)
     print("PROJECT_ID =", new_project.id)
+
+
 
 
     result = db.session.execute(
@@ -446,7 +572,13 @@ def process_visualization_upload():
     db.session.commit()
 
 
+
+
     code_health = calculate_code_health(files_data)
+
+
+
+
 
 
 
@@ -475,6 +607,8 @@ def process_visualization_upload():
         code_health['ratings'] = enhanced_ratings
 
 
+
+
         # --- NEW: Generate Active Warnings ---
     print("Generating Active Warnings...")
     active_warnings = generate_project_warnings(files_data)
@@ -498,6 +632,8 @@ def process_visualization_upload():
     db.session.commit()
 
 
+
+
     db.session.execute(
     db.text("""
         UPDATE projects
@@ -509,6 +645,8 @@ def process_visualization_upload():
     db.session.commit()
 
 
+
+
     # Step C: ArangoDB
     final_nodes = []
     for node_name in unique_nodes:
@@ -516,7 +654,11 @@ def process_visualization_upload():
         final_nodes.append(meta if meta else {"id": node_name, "filename": node_name, "folder": "External", "risk_score": 0})
 
 
+
+
     store_graph_data(session_id, final_nodes, relationships)
+
+
 
 
     db.session.execute(
@@ -530,15 +672,23 @@ def process_visualization_upload():
     db.session.commit()
 
 
+
+
     # Step D: Insights
     insights = generate_internal_insights(files_data)
     with open(os.path.join(graph_folder, "insights.json"), "w", encoding="utf-8") as f:
         json.dump(insights, f)
 
 
+
+
     # Step E: Graph HTML
     html_filename = "graph.html"
     generate_graph_html(session_id, os.path.join(graph_folder, html_filename))
+
+
+
+
 
 
 
@@ -554,7 +704,11 @@ def process_visualization_upload():
     db.session.commit()
 
 
+
+
     graph_url = f"{BASE_URL}/graphs/{rel_path.replace(os.sep, '/')}/{html_filename}"
+
+
 
 
     upload_entry = Upload(
@@ -568,8 +722,12 @@ def process_visualization_upload():
     )
 
 
+
+
     db.session.add(upload_entry)
     db.session.commit()
+
+
 
 
     return api_response("Visualization Generated", {
@@ -584,6 +742,8 @@ def process_visualization_upload():
     }, 200)
 
 
+
+
 def analyze_file_metrics(content, lines):
     readability = max(1, min(5, 5 - (lines / 300)))
     modularity = max(1, min(5, content.count("def ") / 5))
@@ -593,9 +753,13 @@ def analyze_file_metrics(content, lines):
     security = max(1, 5 - security_risk)
 
 
+
+
     reliability = min(5, content.count("try:") + 1)
     performance = max(1, 5 - content.count("for ") * 0.3)
     size_health = max(1, 5 - (lines / 500))
+
+
 
 
     return {
@@ -606,6 +770,8 @@ def analyze_file_metrics(content, lines):
         "performance": round(performance, 2),
         "sizeHealth": round(size_health, 2)
     }
+
+
 
 
 def calculate_code_health(files_data):
@@ -622,6 +788,8 @@ def calculate_code_health(files_data):
     count = len(files_data)
     if count == 0:
         return None
+
+
     for f in files_data:
         for k in totals:
             totals[k] += f["metrics"][k]
@@ -630,17 +798,37 @@ def calculate_code_health(files_data):
     ratings = {k: round(v / count, 1) for k, v in totals.items()}
 
 
-    overall = round(
-        sum(ratings.values()) / 6 * 20, 0
-    )
+    avg = sum(ratings.values()) / 6
+    overall = round(avg * 20, 0)
+
+
+    strengths = [k for k, v in ratings.items() if v >= 4]
+    weaknesses = [k for k, v in ratings.items() if v <= 2]
+
+
+    #  OVERALL SCORE EXPLANATION
+    overall_reason = (
+    f"The overall score reflects a balanced state of the project. "
+    f"Strong results in {', '.join(strengths)} indicate that the code performs well, "
+    f"is relatively easy to understand, and follows good security practices. "
+    f"However, the score is noticeably reduced due to weaknesses in "
+    f"{', '.join(weaknesses)}, which suggest limited modular structure and insufficient "
+    f"defensive or error-handling mechanisms. "
+    f"Addressing these weaker areas could significantly improve maintainability, "
+    f"scalability, and push the overall score into a higher range."
+)
 
 
 
 
     return {
-        "overallScore": int(overall),
+        "overallScore": {
+            "score": int(overall),
+            "reason": overall_reason
+        },
         "ratings": ratings
     }
+
 
 # --- REPLACE THIS FUNCTION TO DEBUG ---
 def generate_project_warnings(files_data):
@@ -652,8 +840,12 @@ def generate_project_warnings(files_data):
         ALLOWED_EXTENSIONS = {'.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.php', '.go', '.rs', '.rb'}
 
 
+
+
         relevant_content = ""
         scanned_count = 0
+
+
 
 
         for f in files_data:
@@ -667,8 +859,12 @@ def generate_project_warnings(files_data):
                 scanned_count += 1
 
 
+
+
         if not relevant_content:
             return None
+
+
 
 
         # --- UPDATED PROMPT: Generic (Not specific to Python) ---
@@ -678,13 +874,19 @@ def generate_project_warnings(files_data):
         Identify issues in these 3 categories suitable for the code's language:
 
 
+
+
         1. "public_endpoints": Exposed API routes/controllers without auth.
         2. "missing_validation": Inputs used without validation/sanitization.
         3. "performance_risks": Blocking operations, heavy loops, or inefficient queries.
 
 
+
+
         CODE CONTEXT:
         {relevant_content}
+
+
 
 
         Return ONLY a raw JSON object with this EXACT structure:
@@ -708,6 +910,8 @@ def generate_project_warnings(files_data):
         """
 
 
+
+
         print(f"⚠️ Scanning {scanned_count} files for Active Warnings using: {ACTIVE_LLM}")
        
         # --- AI CALL LOGIC (Same as before) ---
@@ -719,6 +923,9 @@ def generate_project_warnings(files_data):
             contents=prompt
             )
             response_text = resp.text
+
+
+
 
 
 
@@ -734,21 +941,26 @@ def generate_project_warnings(files_data):
             if resp.status_code == 200: response_text = resp.json()['choices'][0]['message']['content']
 
 
+
+
         elif ACTIVE_LLM == "mistral_local":
             payload = {"model": "mistral", "prompt": prompt, "stream": False, "format": "json"}
             try:
-                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=30)
+                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
                 if resp.status_code == 200: response_text = resp.json().get('response', '')
             except: return None
+
+
 
 
         cleaned = response_text.replace("```json", "").replace("```", "").strip()
         return json.loads(cleaned)
 
 
+
+
     except Exception as e:
         print(f"❌ Warning Generation Error: {e}")
         return None
-
 
 
