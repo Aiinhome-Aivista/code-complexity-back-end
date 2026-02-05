@@ -270,7 +270,10 @@ def ai_scan_code_detailed(content, filename):
             "type": "Security"|"Performance"|"Bug",
             "severity": "High"|"Medium"|"Low",
             "title": "<short title>",
-            "suggested_explanation": "<detailed fix>"
+            "suggested_explanation": "<detailed fix>",
+            "original_snippet": "<the exact lines of code with the issue>",
+            "suggested_fix": "<the corrected version of that snippet>"
+
         }}
     ]
     Code:

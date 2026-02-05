@@ -14,6 +14,7 @@ from controllers.heatmap import code_risk_heatmap
 from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER 
 from controllers.download_controller import download_updated_code
 from controllers.relationship_controller import get_relationship_flow
+from controllers.analysis_controller import apply_ai_fix
 # from controllers.analysis_controller import get_project_dependencies
 
 
@@ -141,6 +142,13 @@ def download_code_route():
 @app.route(ANALYSIS_URL + "/relationships_flow", methods=["POST"])
 def get_relationship_flow_controller():
     return get_relationship_flow()
+
+
+@app.route(ANALYSIS_URL + "/apply-ai-fix", methods=["POST"])
+def apply_fix_route():
+    return apply_ai_fix()
+
+
 
 
 

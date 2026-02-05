@@ -73,8 +73,21 @@ FILES:
             "messages": [{"role": "user", "content": prompt}],
             "response_format": {"type": "json_object"}
         }
-        resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
-        text = resp.json()["choices"][0]["message"]["content"]
+
+        resp = requests.post(
+            "https://api.mistral.ai/v1/chat/completions",  
+            json=payload,
+            headers=headers,
+            timeout=MISTRAL_TIMEOUT
+        )
+
+        resp_json = resp.json()
+        if "choices" not in resp_json:
+            return flow_nodes
+
+        text = resp_json["choices"][0]["message"]["content"]
+
+
 
     # ---------------- LOCAL MISTRAL ----------------
     elif ACTIVE_LLM == "mistral_local":

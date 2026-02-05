@@ -474,6 +474,8 @@ def save_file():
     except Exception as e:
         print(f"Failed to save file: {e}")
         return api_response("Failed to save file", str(e), 500)
+
+
 # Pass-through functions for other endpoints managed elsewhere
 def analyze_upload(): pass
 # def save_file(): pass
@@ -530,5 +532,63 @@ def analyze_file_issues(): pass
 #     }
 
 #     return api_response("Dependency Graph Data Fetched", graph_data, 200)
+
+def apply_ai_fix():
+    data = request.json
+
+    user_id = data.get("user_id")
+    session_id = data.get("session_id")
+    filename = data.get("filename")
+    original_snippet = data.get("original_snippet")
+    suggested_fix = data.get("suggested_fix")
+
+    if not all([user_id, session_id, filename, original_snippet, suggested_fix]):
+        return api_response("Missing required fields", None, 400)
+
+    # Path: uploads/{user_id}/{session_id}/extracted/{filename}
+    session_root = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
+    file_path = os.path.join(session_root, "extracted", filename)
+
+    # Security: path traversal check
+    if not os.path.abspath(file_path).startswith(os.path.abspath(session_root)):
+        return api_response("Invalid file path", None, 403)
+
+    if not os.path.exists(file_path):
+        return api_response("File not found", None, 404)
+
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        if original_snippet not in content:
+            return api_response(
+                "Original code snippet not found in file",
+                None,
+                409
+            )
+
+        # 🔥 Replace only FIRST occurrence
+        updated_content = content.replace(
+            original_snippet,
+            suggested_fix,
+            1
+        )
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(updated_content)
+
+        return api_response(
+            "AI Fix Applied & File Saved",
+            {
+                "filename": filename,
+                "updated_content": updated_content
+            },
+            200
+        )
+
+    except Exception as e:
+        print("Apply Fix Error:", e)
+        return api_response("Failed to apply fix", str(e), 500)
+
 
     
