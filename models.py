@@ -40,6 +40,8 @@ class FileAnalysis(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     filename = db.Column(db.String(255), nullable=False)
     content = db.Column(db.Text)
+    applied_fixes = db.Column(db.JSON, default=list)
+
     
     # Metrics
     complexity = db.Column(db.Integer)
