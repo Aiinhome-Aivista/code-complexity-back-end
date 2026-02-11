@@ -1,17 +1,16 @@
 
 import os
-import shutil
 import uuid
 import json
 import time
+import shutil
 from flask import request
-from models import Upload, db, User, Project, FileAnalysis, TokenUsage
-# Import updated functions
-from analysis import analyze_code, get_ai_fix, ai_scan_code_detailed
-from file_utils import handle_zip_upload
 from utils.response import api_response
-from config import UPLOAD_FOLDER, FREE_TIER_LIMIT_FILES, BASE_URL, MODEL_NAME, MISTRAL_MODEL
+from file_utils import handle_zip_upload
 from services.ml_service import get_embedding_model
+from analysis import analyze_code, get_ai_fix, ai_scan_code_detailed
+from models import AppliedFix, Upload, db, User, Project, FileAnalysis, TokenUsage
+from config import UPLOAD_FOLDER, FREE_TIER_LIMIT_FILES, BASE_URL, MODEL_NAME, MISTRAL_MODEL
 
 
 embedding_model = get_embedding_model()
@@ -275,142 +274,6 @@ def analyze_project_ai():
     }, 200)
 
 
-# def analyze_project_ai():
-#     data = request.json
-#     user_id = data.get('user_id')
-#     session_id = data.get('session_id')
-
-#     if not user_id or not session_id:
-#         return api_response("Missing user_id or session_id", None, 400)
-
-#     project = Project.query.filter_by(user_id=user_id, session_id=session_id).first()
-#     if not project:
-#         return api_response("Project not found", None, 404)
-
-#     files = FileAnalysis.query.filter_by(project_id=project.id).all()
-   
-#     flat_report = []
-#     session_root = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
-   
-#     # IGNORE FILTER
-#     IGNORE_DIRS = ['__pycache__', '.git', 'node_modules', 'venv', 'env']
-#     IGNORE_EXTS = ('.pyc', '.pyo', '.pyd', '.so', '.dll', '.exe', '.jpg', '.png', '.zip')
-
-#     for file_record in files:
-#         if any(bad in file_record.filename for bad in IGNORE_DIRS): continue
-#         if file_record.filename.endswith(IGNORE_EXTS): continue
-
-#         file_path = os.path.join(session_root, file_record.filename)
-       
-#         # Robust Find
-#         if not os.path.exists(file_path):
-#             alt_path = os.path.join(session_root, "extracted", file_record.filename)
-#             if os.path.exists(alt_path): file_path = alt_path
-#             else:
-#                 for root, _, fs in os.walk(session_root):
-#                     if os.path.basename(file_record.filename) in fs:
-#                         file_path = os.path.join(root, os.path.basename(file_record.filename))
-#                         break
-       
-#         if os.path.exists(file_path):
-#             try:
-#                 # --- NEW LOGIC START: CALCULATE RELATIVE PATH ---
-#                 # This fixes the "missing subfolder" issue.
-#                 extracted_root = os.path.join(session_root, "extracted")
-                
-#                 # Check if the file is inside the 'extracted' folder
-#                 # os.path.abspath ensures we are comparing full paths
-#                 if os.path.exists(extracted_root) and extracted_root in os.path.abspath(file_path):
-#                     # This turns "C:/.../extracted/controllers/auth.py" into "controllers/auth.py"
-#                     display_filename = os.path.relpath(file_path, extracted_root)
-#                 else:
-#                     # Fallback: Just use the filename if it's not in the extracted folder
-#                     display_filename = os.path.basename(file_path)
-                
-#                 # Windows Fix: Ensure forward slashes for web URLs
-#                 display_filename = display_filename.replace('\\', '/')
-#                 # --- NEW LOGIC END ---
-
-#                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-#                     content = f.read()
-               
-#                 if len(content) > 40000: continue
-
-#                 print(f"AI Analyzing: {display_filename}...")
-               
-#                 # --- CALL AI & GET USAGE ---
-#                 # Changed: Pass 'display_filename' instead of 'file_record.filename'
-#                 ai_issues, usage = ai_scan_code_detailed(content, display_filename)
-               
-#                 # --- LOG TOKENS ---
-#                 if usage:
-#                     log_token_usage(user_id, session_id, usage)
-
-#                 if not isinstance(ai_issues, list): ai_issues = []
-
-#                 # Update File Record
-#                 file_record.issues_json = json.dumps(ai_issues)
-#                 db.session.commit()
-
-#                 flat_report.append({
-#                     "file_id": file_record.id,
-#                     "filename": display_filename, # <--- CRITICAL UPDATE HERE
-#                     "lines": file_record.lines_of_code,
-#                     "issues": ai_issues
-#                 })
-                
-#             except Exception as e:
-#                 print(f"Failed to analyze {file_record.filename}: {e}")
-#                 continue
-
-#     project_tree = build_analysis_tree(flat_report, user_id, session_id)
-
-#     upload = Upload.query.filter_by(
-#     project_id=project.id,
-#     session_id=session_id
-#     ).first()
-
-#     if upload:
-#             # Save the generated tree into the analyze_data column
-#             # This ensures the NULL value in your database gets filled
-#             upload.analyze_data = project_tree 
-            
-#             db.session.add(upload)
-#             db.session.commit()
-#             print("Successfully saved analysis tree to database.")
-#     else:
-#             print(f"Warning: Upload record not found for Session {session_id}")
-
-
-
-#     return api_response("Full Project Analysis Complete", {
-#             "project_id": project.id,
-#             "files_analyzed": len(flat_report),
-#             "FileNode": project_tree
-#         }, 200)
-
-    
-
-# def generate_ai_suggestion():
-#     data = request.json
-#     snippet = data.get('snippet')
-#     error = data.get('error')
-#     filename = data.get('filename', 'code')
-#     user_id = data.get('user_id', 1) # Default to 1 if missing for now
-   
-#     if not snippet or not error:
-#         return api_response("Missing code/error", None, 400)
-   
-#     # --- CALL AI FIX & GET USAGE ---
-#     suggestion_json, usage = get_ai_fix(snippet, error, filename)
-   
-#     if usage:
-#         # Assuming session_id isn't strictly needed for quick fixes, or pass "adhoc"
-#         log_token_usage(user_id, "adhoc-fix", usage)
-
-
-#     return api_response("AI Suggestion Generated", {"suggestion": suggestion_json}, 200)
-
 # --- 1. GENERATE AI FIX SUGGESTION ---
 def generate_ai_suggestion():
     data = request.json
@@ -483,56 +346,6 @@ def analyze_file_issues(): pass
 
 
 
-# def get_project_dependencies():
-#     data = request.json
-#     user_id = data.get('user_id')
-#     session_id = data.get('session_id')
-
-#     if not user_id or not session_id:
-#         return api_response("Missing user_id or session_id", None, 400)
-
-#     # 1. Find Project & Upload
-#     project = Project.query.filter_by(user_id=user_id, session_id=session_id).first()
-#     if not project:
-#         return api_response("Project not found", None, 404)
-
-#     upload = Upload.query.filter_by(project_id=project.id, session_id=session_id).first()
-#     if not upload:
-#         return api_response("Analysis data not found", None, 404)
-
-#     # 2. Get Raw Data
-#     raw_nodes = upload.analyze_data if upload.analyze_data else []
-#     edges = upload.relationships if upload.relationships else []
-
-#     # 3. FILTER NODES (Remove issues, severity, etc.)
-#     simplified_nodes = []
-    
-#     # Check if raw_nodes is a list (flat structure) or dict (tree structure)
-#     # Based on your previous JSON, it looks like a flat list inside "FileNode" or similar.
-#     # We iterate safely:
-#     source_list = raw_nodes if isinstance(raw_nodes, list) else raw_nodes.get('FileNode', [])
-
-#     for node in source_list:
-#         # Create a clean object with ONLY what the graph needs
-#         clean_node = {
-#             "id": node.get("id"),
-#             "file_id": node.get("file_id"),
-#             "filename": node.get("filename"), # e.g. "app.py"
-#             "type": node.get("type", "file"), # e.g. "file" or "folder"
-#             # We explicitly SKIP "issues", "suggested_explanation", etc.
-#         }
-#         simplified_nodes.append(clean_node)
-
-#     # 4. Construct Final Response
-#     graph_data = {
-#         "nodes": simplified_nodes,
-#         "edges": edges,
-#         "total_files": len(simplified_nodes),
-#         "total_relationships": len(edges)
-#     }
-
-#     return api_response("Dependency Graph Data Fetched", graph_data, 200)
-
 def apply_ai_fix():
     data = request.json
 
@@ -545,11 +358,9 @@ def apply_ai_fix():
     if not all([user_id, session_id, filename, original_snippet, suggested_fix]):
         return api_response("Missing required fields", None, 400)
 
-    # Path: uploads/{user_id}/{session_id}/extracted/{filename}
     session_root = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
     file_path = os.path.join(session_root, "extracted", filename)
 
-    # Security: path traversal check
     if not os.path.abspath(file_path).startswith(os.path.abspath(session_root)):
         return api_response("Invalid file path", None, 403)
 
@@ -557,6 +368,9 @@ def apply_ai_fix():
         return api_response("File not found", None, 404)
 
     try:
+        # -----------------------------
+        # 1. APPLY FIX TO FILE
+        # -----------------------------
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
@@ -567,20 +381,56 @@ def apply_ai_fix():
                 409
             )
 
-        # 🔥 Replace only FIRST occurrence
-        updated_content = content.replace(
-            original_snippet,
-            suggested_fix,
-            1
-        )
+        updated_content = content.replace(original_snippet, suggested_fix, 1)
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(updated_content)
 
+        # -----------------------------
+        # 2. UPDATE FileAnalysis.issues_json  ✅ THIS WAS MISSING
+        # -----------------------------
+        project = Project.query.filter_by(
+            user_id=user_id,
+            session_id=session_id
+        ).first()
+
+        if project:
+            file_record = FileAnalysis.query.filter_by(
+                project_id=project.id,
+                filename=filename
+            ).first()
+
+            if file_record:
+                issues = json.loads(file_record.issues_json or "[]")
+
+                # 🔥 REMOVE the fixed issue
+                updated_issues = [
+                    issue for issue in issues
+                    if issue.get("original_snippet") != original_snippet
+                ]
+
+                file_record.issues_json = json.dumps(updated_issues)
+                db.session.commit()
+
+        # -----------------------------
+        # 3. OPTIONAL: TRACK APPLIED FIX
+        # -----------------------------
+        applied_fix = AppliedFix(
+            user_id=user_id,
+            session_id=session_id,
+            modified_code={
+                "filename": filename,
+                "code": updated_content
+            }
+        )
+        db.session.add(applied_fix)
+        db.session.commit()
+
         return api_response(
-            "AI Fix Applied & File Saved",
+            "AI Fix Applied & Issue Removed",
             {
                 "filename": filename,
+                "remaining_issues": len(updated_issues),
                 "updated_content": updated_content
             },
             200
@@ -589,6 +439,3 @@ def apply_ai_fix():
     except Exception as e:
         print("Apply Fix Error:", e)
         return api_response("Failed to apply fix", str(e), 500)
-
-
-    

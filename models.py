@@ -117,5 +117,13 @@ class TokenUsage(db.Model):
     def __repr__(self):
         return f"<TokenUsage {self.provider} | {self.total_tokens} tokens>"
 
+class AppliedFix(db.Model):
+    __tablename__ = "applied_fix"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False)
+    session_id = db.Column(db.String(100), nullable=False)
+    modified_code = db.Column(db.JSON, nullable=False)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 

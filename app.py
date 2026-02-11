@@ -116,6 +116,11 @@ def generate_insights():
 def generate_visualization(): 
     return visualization_controller.process_visualization_upload()
 
+# Git repository upload
+@app.route(VIZ_URL + '/upload_git', methods=['POST'])
+def generate_visualization_from_git():
+    return visualization_controller.process_git_upload()    
+
 
 @app.route(ANALYSIS_URL + '/analyze_project_ai', methods=['POST'])
 def analyze_project_ai(): 

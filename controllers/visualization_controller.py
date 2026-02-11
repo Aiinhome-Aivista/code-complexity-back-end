@@ -11,6 +11,7 @@ import chromadb
 from google import genai
 from flask import request
 from models import Upload
+from services.git_service import clone_git_repo
 from utils.response import api_response
 from werkzeug.utils import secure_filename
 from utils.file_utils import handle_zip_upload
@@ -964,3 +965,160 @@ def generate_project_warnings(files_data):
         return None
 
 
+
+
+def process_git_upload():
+    data = request.json
+
+    user_id = data.get("user_id")
+    project_name = data.get("project_name")
+    repo_url = data.get("repo_url")
+    branch = data.get("branch", "main")
+    token = data.get("token")  # optional (private repos)
+
+    user = db.session.get(User, user_id) if user_id else None
+    if not user:
+        return api_response("User not found", None, 404)
+
+    if not repo_url:
+        return api_response("Repository URL required", None, 400)
+
+    session_id = str(uuid.uuid4())
+    rel_path = os.path.join(str(user_id), session_id)
+
+    session_folder = os.path.join(UPLOAD_FOLDER, rel_path)
+    graph_folder = os.path.join(GRAPH_FOLDER, rel_path)
+    extracted_path = os.path.join(session_folder, "extracted")
+
+    os.makedirs(session_folder, exist_ok=True)
+    os.makedirs(graph_folder, exist_ok=True)
+
+    # -----------------------------
+    # STEP 1: CLONE REPO
+    # -----------------------------
+    try:
+        clone_git_repo(repo_url, extracted_path, branch, token)
+    except Exception as e:
+        return api_response("Failed to clone repository", str(e), 500)
+
+    # -----------------------------
+    # STEP 2: CREATE PROJECT
+    # -----------------------------
+    new_project = Project(
+        name=project_name or f"Git_{session_id[:8]}",
+        user_id=user.id,
+        session_id=session_id,
+        code_health_status="PENDING",
+        api_analysis_status="PENDING",
+        visualization_status="PENDING",
+        relationship_status="PENDING"
+    )
+
+    db.session.add(new_project)
+    db.session.commit()
+
+    # -----------------------------
+    # STEP 3: SAME PIPELINE AS ZIP
+    # -----------------------------
+    analyzer = PythonAnalyzer()
+    relationships = []
+    unique_nodes = set()
+    files_data = []
+
+    embedding_model = get_embedding_model()
+    collection = get_chroma_client().get_or_create_collection(
+        name=f"session_{session_id}"
+    )
+
+    IGNORE_DIRS = {'.git', '__pycache__', 'node_modules', 'venv', 'env'}
+
+    for root, dirs, files in os.walk(extracted_path):
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+
+        for f in files:
+            file_path = os.path.join(root, f)
+
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as fr:
+                    content = fr.read()
+            except:
+                continue
+
+            rel_file = os.path.relpath(file_path, extracted_path).replace("\\", "/")
+            lines = len(content.splitlines())
+
+            # AST
+            if f.endswith('.py'):
+                analyzer.analyze(file_path, relationships, unique_nodes)
+            else:
+                unique_nodes.add(rel_file)
+
+            risk = min(100, int((content.count('if ') + content.count('for ')) * 1.5))
+            metrics = analyze_file_metrics(content, lines)
+            ext = os.path.splitext(f)[1].lower()
+
+            files_data.append({
+                "id": rel_file,
+                "filename": rel_file,
+                "extension": ext,
+                "folder": os.path.dirname(rel_file) or "Root",
+                "lines_of_code": lines,
+                "risk_score": risk,
+                "metrics": metrics,
+                "content": content
+            })
+
+            db.session.add(FileAnalysis(
+                project_id=new_project.id,
+                filename=rel_file,
+                content=content[:5000],
+                complexity=risk,
+                risk_score=risk,
+                lines_of_code=lines,
+                security_issues=0,
+                issues_json="[]",
+                api_json="[]"
+            ))
+            db.session.commit()
+
+            # Vector DB
+            collection.add(
+                documents=[content[:5000]],
+                embeddings=[embedding_model.encode(content).tolist()],
+                ids=[f"{session_id}_{rel_file}"]
+            )
+
+    # -----------------------------
+    # STEP 4: SAME FINALIZATION
+    # -----------------------------
+    analyzed_filenames = [f["filename"] for f in files_data]
+
+    db.session.execute(
+        db.text("""
+            UPDATE projects
+            SET files_analyzed = :files
+            WHERE id = :pid
+        """),
+        {"files": json.dumps(analyzed_filenames), "pid": new_project.id}
+    )
+    db.session.commit()
+
+    code_health = calculate_code_health(files_data)
+    active_warnings = generate_project_warnings(files_data)
+    insights = generate_internal_insights(files_data)
+
+    upload_entry = Upload(
+        project_id=new_project.id,
+        session_id=session_id,
+        codeHealth=code_health,
+        files=files_data,
+        insights=insights
+    )
+
+    db.session.add(upload_entry)
+    db.session.commit()
+
+    return api_response("Git Repository Analyzed", {
+        "project_id": new_project.id,
+        "session_id": session_id
+    }, 200)
