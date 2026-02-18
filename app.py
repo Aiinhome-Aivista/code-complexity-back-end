@@ -3,6 +3,7 @@ import os
 from models import db
 from flask_cors import CORS
 from urllib.parse import quote_plus
+from controllers import git_controller
 from controllers import auth_controller
 from controllers import admin_controller
 from controllers import project_controller
@@ -11,11 +12,11 @@ from controllers import analysis_controller
 from flask import Flask, send_from_directory
 from controllers import visualization_controller
 from controllers.heatmap import code_risk_heatmap
+from controllers.analysis_controller import apply_ai_fix
 from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER 
 from controllers.download_controller import download_updated_code
 from controllers.relationship_controller import get_relationship_flow
-from controllers.analysis_controller import apply_ai_fix
-# from controllers.analysis_controller import get_project_dependencies
+
 
 
 app = Flask(__name__)
@@ -157,13 +158,23 @@ def apply_fix_route():
 
 
 
+@app.route(ANALYSIS_URL + "/clone",methods=["POST"])
+def clone():
+    return git_controller.clone()
+
+@app.route(ANALYSIS_URL + "/pull",methods=["POST"])
+def pull():
+    return git_controller.pull()
+
+@app.route(ANALYSIS_URL + "/push",methods=["POST"])
+def push():
+    return git_controller.push()
+
+
+
+
+
 if __name__ == "__main__":  
     app.run(host="0.0.0.0", port=3019, debug=True)
-
-
-
-
-
-
 
 

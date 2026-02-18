@@ -10,7 +10,7 @@ from file_utils import handle_zip_upload
 from services.ml_service import get_embedding_model
 from analysis import analyze_code, get_ai_fix, ai_scan_code_detailed
 from models import AppliedFix, Upload, db, User, Project, FileAnalysis, TokenUsage
-from config import UPLOAD_FOLDER, FREE_TIER_LIMIT_FILES, BASE_URL, MODEL_NAME, MISTRAL_MODEL
+from config import UPLOAD_FOLDER, FREE_TIER_LIMIT_FILES, BASE_URL, MODEL_NAME, MISTRAL_MODEL, UPLOAD_BASE_URL
 
 
 embedding_model = get_embedding_model()
@@ -162,6 +162,21 @@ def analyze_project_ai():
     if not project:
         return api_response("Project not found", None, 404)
 
+    # LOCAL filesystem path (for backend, git, os)
+    project_folder_path = os.path.join(
+        UPLOAD_FOLDER,
+        str(user_id),
+        session_id,
+        "extracted"
+    )
+
+    # PUBLIC URL (only for frontend response)
+    project_folder_url = f"{UPLOAD_BASE_URL}/{user_id}/{session_id}/extracted"
+
+
+
+
+
     # --- NEW LOGIC: CHECK FOR EXISTING DATA (CACHE BYPASS) ---
     # 1. Find the upload record first
     existing_upload = Upload.query.filter_by(project_id=project.id, session_id=session_id).first()
@@ -179,6 +194,7 @@ def analyze_project_ai():
 
         return api_response("Analysis Fetched from Cache", {
             "project_id": project.id,
+            "project_folder": project_folder_url,
             "files_analyzed": file_count, 
             "FileNode": existing_data
         }, 200)
@@ -269,6 +285,7 @@ def analyze_project_ai():
 
     return api_response("Full Project Analysis Complete", {
         "project_id": project.id,
+        "project_folder": project_folder_url,
         "files_analyzed": len(flat_report),
         "FileNode": project_tree
     }, 200)

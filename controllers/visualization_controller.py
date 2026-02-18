@@ -974,8 +974,11 @@ def process_git_upload():
     project_name = data.get("project_name")
     repo_url = data.get("repo_url")
     branch = data.get("branch", "main")
-    token = data.get("token")  # optional (private repos)
+    token = data.get("token")  # optional
 
+    # -----------------------------
+    # BASIC VALIDATION
+    # -----------------------------
     user = db.session.get(User, user_id) if user_id else None
     if not user:
         return api_response("User not found", None, 404)
@@ -983,23 +986,41 @@ def process_git_upload():
     if not repo_url:
         return api_response("Repository URL required", None, 400)
 
+    # -----------------------------
+    # SESSION SETUP
+    # -----------------------------
     session_id = str(uuid.uuid4())
-    rel_path = os.path.join(str(user_id), session_id)
 
-    session_folder = os.path.join(UPLOAD_FOLDER, rel_path)
-    graph_folder = os.path.join(GRAPH_FOLDER, rel_path)
-    extracted_path = os.path.join(session_folder, "extracted")
+    session_folder = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
+    graph_folder = os.path.join(GRAPH_FOLDER, str(user_id), session_id)
 
     os.makedirs(session_folder, exist_ok=True)
     os.makedirs(graph_folder, exist_ok=True)
 
     # -----------------------------
-    # STEP 1: CLONE REPO
+    # STEP 1: CLONE REPO 
     # -----------------------------
-    try:
-        clone_git_repo(repo_url, extracted_path, branch, token)
-    except Exception as e:
-        return api_response("Failed to clone repository", str(e), 500)
+    clone_result = clone_git_repo(
+        repo_url=repo_url,
+        user_id=user_id,
+        session_id=session_id,
+        branch=branch,
+        token=token
+    )
+
+    if clone_result.get("statusCode") != 201:
+        return api_response("Failed to clone repository", clone_result, 500)
+
+    # extracted path MUST be resolved AFTER clone
+    extracted_path = os.path.join(
+        UPLOAD_FOLDER,
+        str(user_id),
+        session_id,
+        "extracted"
+    )
+
+    if not os.path.exists(extracted_path):
+        return api_response("Extracted repository folder not found", None, 500)
 
     # -----------------------------
     # STEP 2: CREATE PROJECT
@@ -1018,7 +1039,7 @@ def process_git_upload():
     db.session.commit()
 
     # -----------------------------
-    # STEP 3: SAME PIPELINE AS ZIP
+    # STEP 3: ANALYSIS PIPELINE
     # -----------------------------
     analyzer = PythonAnalyzer()
     relationships = []
@@ -1041,19 +1062,18 @@ def process_git_upload():
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as fr:
                     content = fr.read()
-            except:
+            except Exception:
                 continue
 
             rel_file = os.path.relpath(file_path, extracted_path).replace("\\", "/")
             lines = len(content.splitlines())
 
-            # AST
-            if f.endswith('.py'):
+            if f.endswith(".py"):
                 analyzer.analyze(file_path, relationships, unique_nodes)
             else:
                 unique_nodes.add(rel_file)
 
-            risk = min(100, int((content.count('if ') + content.count('for ')) * 1.5))
+            risk = min(100, int((content.count("if ") + content.count("for ")) * 1.5))
             metrics = analyze_file_metrics(content, lines)
             ext = os.path.splitext(f)[1].lower()
 
@@ -1081,7 +1101,6 @@ def process_git_upload():
             ))
             db.session.commit()
 
-            # Vector DB
             collection.add(
                 documents=[content[:5000]],
                 embeddings=[embedding_model.encode(content).tolist()],
@@ -1089,7 +1108,7 @@ def process_git_upload():
             )
 
     # -----------------------------
-    # STEP 4: SAME FINALIZATION
+    # STEP 4: FINALIZATION
     # -----------------------------
     analyzed_filenames = [f["filename"] for f in files_data]
 
@@ -1104,7 +1123,6 @@ def process_git_upload():
     db.session.commit()
 
     code_health = calculate_code_health(files_data)
-    active_warnings = generate_project_warnings(files_data)
     insights = generate_internal_insights(files_data)
 
     upload_entry = Upload(
@@ -1118,7 +1136,13 @@ def process_git_upload():
     db.session.add(upload_entry)
     db.session.commit()
 
-    return api_response("Git Repository Analyzed", {
-        "project_id": new_project.id,
-        "session_id": session_id
-    }, 200)
+    return api_response(
+        "Git Repository Analyzed",
+        {
+            "project_id": new_project.id,
+            "session_id": session_id
+        },
+        200
+    )
+
+
