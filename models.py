@@ -126,4 +126,56 @@ class AppliedFix(db.Model):
     modified_code = db.Column(db.JSON, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
+class Plan(db.Model):
+    __tablename__ = "plans"
 
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)  # FREE / PREMIUM
+
+    max_upload_size = db.Column(db.BigInteger, nullable=False)  # bytes
+    git_access = db.Column(db.Boolean, default=False)
+
+    price = db.Column(db.Float, default=0.0)
+    duration_days = db.Column(db.Integer, nullable=True)  # NULL for FREE
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    unit = db.Column(db.Enum('MB', 'KB', name='unit_enum'),nullable=True)
+
+    # Relationship
+    subscriptions = db.relationship('UserSubscription', backref='plan', lazy=True)
+
+    def __repr__(self):
+        return f"<Plan {self.name}>"
+
+class UserSubscription(db.Model):
+    __tablename__ = "user_subscriptions"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    plan_id = db.Column(db.Integer, db.ForeignKey('plans.id'), nullable=False)
+
+    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    end_date = db.Column(db.DateTime, nullable=True)
+
+    status = db.Column(
+        db.Enum('active', 'expired', 'cancelled', name='subscription_status'),
+        default='active'
+    )
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationship
+    user = db.relationship('User', backref=db.backref('subscriptions', lazy=True))
+
+    def is_active(self):
+        if self.status != "active":
+            return False
+        if self.end_date and self.end_date < datetime.utcnow():
+            self.status = "expired"
+            db.session.commit()
+            return False
+        return True
+
+    def __repr__(self):
+        return f"<UserSubscription User:{self.user_id} Plan:{self.plan_id}>"

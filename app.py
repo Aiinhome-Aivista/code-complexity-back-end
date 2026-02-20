@@ -3,19 +3,21 @@ import os
 from models import db
 from flask_cors import CORS
 from urllib.parse import quote_plus
+from controllers import git_controller
 from controllers import auth_controller
 from controllers import admin_controller
 from controllers import project_controller
 from controllers import insight_controller
 from controllers import analysis_controller
-from flask import Flask, send_from_directory
+from flask import Flask, send_from_directory, request
 from controllers import visualization_controller
 from controllers.heatmap import code_risk_heatmap
+from controllers.analysis_controller import apply_ai_fix
 from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER 
 from controllers.download_controller import download_updated_code
 from controllers.relationship_controller import get_relationship_flow
-from controllers.analysis_controller import apply_ai_fix
-# from controllers.analysis_controller import get_project_dependencies
+from controllers.subscription_controller import get_all_plans,get_plans_by_user
+
 
 
 app = Flask(__name__)
@@ -157,13 +159,38 @@ def apply_fix_route():
 
 
 
+@app.route(ANALYSIS_URL + "/clone",methods=["POST"])
+def clone():
+    return git_controller.clone()
+
+@app.route(ANALYSIS_URL + "/pull",methods=["POST"])
+def pull():
+    return git_controller.pull()
+
+@app.route(ANALYSIS_URL + "/push",methods=["POST"])
+def push():
+    return git_controller.push()
+
+@app.route('/api/fetch_git_config/<int:user_id>', methods=['GET'])
+def api_get_git(user_id):
+    return git_controller.get_git_info(user_id)
+
+@app.route('/api/update_git_config/<int:user_id>', methods=['PUT'])
+def api_update_git(user_id):
+    data = request.json
+    return git_controller.update_git_info(user_id, data)
+
+@app.route('/api/plans', methods=['GET'])
+def api_get_all_plans():
+    return get_all_plans()
+
+@app.route('/api/plans/user/<int:user_id>', methods=['GET'])
+def api_get_plans_by_user(user_id):
+    return get_plans_by_user(user_id)
+
+
+
 if __name__ == "__main__":  
     app.run(host="0.0.0.0", port=3019, debug=True)
-
-
-
-
-
-
 
 

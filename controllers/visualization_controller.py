@@ -58,7 +58,6 @@ class PythonAnalyzer:
 
 
 
-
     def analyze(self, file_path, relationships, file_list):
         filename = os.path.basename(file_path)
         file_list.add(filename)
@@ -84,8 +83,6 @@ class PythonAnalyzer:
                     if target not in self.IGNORE_LIST:
                         relationships.append({"source": filename, "target": module, "type": "dependency"})
                         file_list.add(module)
-
-
 
 
 # --- REPLACE THIS FUNCTION ---
@@ -400,8 +397,6 @@ def generate_health_explanations(files_data, ratings):
         return {k: {"reason": "Analysis failed."} for k in ratings}
 
 
-
-
 def process_visualization_upload():
     if 'files' not in request.files: return api_response("No files", None, 400)
     user_id = request.form.get('user_id')
@@ -419,9 +414,6 @@ def process_visualization_upload():
     os.makedirs(session_folder, exist_ok=True)
     os.makedirs(graph_folder, exist_ok=True)
 
-
-
-
     uploaded_files = request.files.getlist('files')
     scan_path = session_folder
    
@@ -435,9 +427,6 @@ def process_visualization_upload():
         for f in uploaded_files:
             if f.filename: f.save(os.path.join(session_folder, secure_filename(f.filename)))
 
-
-
-
     # FIX 1: Commit Project Immediately
     new_project = Project(
     name=project_name or f"Session_{session_id[:8]}",
@@ -449,11 +438,6 @@ def process_visualization_upload():
     relationship_status="PENDING"
     ) 
 
-
-
-
-
-
     db.session.add(new_project)
     try:
         db.session.commit()
@@ -462,16 +446,12 @@ def process_visualization_upload():
         return api_response(f"Database Error: {str(e)}", None, 500)
 
 
-
-
     analyzer = PythonAnalyzer()
     relationships = []
     unique_nodes = set()
     files_data = []
     embedding_model = get_embedding_model()
     collection = get_chroma_client().get_or_create_collection(name=f"session_{session_id}")
-
-
 
 
     for root, dirs, files in os.walk(scan_path):
@@ -484,8 +464,6 @@ def process_visualization_upload():
             else: unique_nodes.add(filename)
 
 
-
-
             # Step B: Metadata & Database
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as fr: content = fr.read()
@@ -495,17 +473,9 @@ def process_visualization_upload():
                 if folder == '.': folder = "Root"
 
 
-
-
                 metrics = analyze_file_metrics(content, lines)
 
-
-
-
                 ext = os.path.splitext(filename)[1].lower()
-
-
-
 
                 files_data.append({
                     "id": filename,
@@ -517,9 +487,6 @@ def process_visualization_upload():
                     "metrics": metrics,
                     "content": content      
                 })
-
-
-
 
                 # FIX 2: Commit Each File Individually to keep connection alive
                 db.session.add(FileAnalysis(
@@ -535,9 +502,6 @@ def process_visualization_upload():
                 ))
                 db.session.commit() # Commit per file
 
-
-
-
                 # Add to VectorDB
                 collection.add(documents=[content[:5000]], embeddings=[embedding_model.encode(content).tolist()], ids=[f"{session_id}_{filename}"])
             except Exception as e:
@@ -545,18 +509,9 @@ def process_visualization_upload():
                 db.session.rollback() # Rollback only this file, continue loop
 
 
-
-
-
-
-
-
     analyzed_filenames = [f["filename"] for f in files_data]
     print("ANALYZED_FILES =", analyzed_filenames)
     print("PROJECT_ID =", new_project.id)
-
-
-
 
     result = db.session.execute(
         db.text("""
@@ -572,17 +527,7 @@ def process_visualization_upload():
     print("ROWS AFFECTED =", result.rowcount)
     db.session.commit()
 
-
-
-
     code_health = calculate_code_health(files_data)
-
-
-
-
-
-
-
 
     # --- MODIFIED: AI Explanation Logic with new structure ---
     if code_health and 'ratings' in code_health:
@@ -607,9 +552,6 @@ def process_visualization_upload():
        
         code_health['ratings'] = enhanced_ratings
 
-
-
-
         # --- NEW: Generate Active Warnings ---
     print("Generating Active Warnings...")
     active_warnings = generate_project_warnings(files_data)
@@ -621,7 +563,6 @@ def process_visualization_upload():
             "performance_risks": {"count": 0, "items": [], "description": "Analysis unavailable"}
         }
  
-   
     db.session.execute(
     db.text("""
         UPDATE projects
@@ -631,9 +572,6 @@ def process_visualization_upload():
     {"pid": new_project.id}
     )
     db.session.commit()
-
-
-
 
     db.session.execute(
     db.text("""
@@ -645,22 +583,13 @@ def process_visualization_upload():
     )
     db.session.commit()
 
-
-
-
     # Step C: ArangoDB
     final_nodes = []
     for node_name in unique_nodes:
         meta = next((f for f in files_data if f['filename'] == node_name), None)
         final_nodes.append(meta if meta else {"id": node_name, "filename": node_name, "folder": "External", "risk_score": 0})
 
-
-
-
     store_graph_data(session_id, final_nodes, relationships)
-
-
-
 
     db.session.execute(
     db.text("""
@@ -672,27 +601,14 @@ def process_visualization_upload():
     )
     db.session.commit()
 
-
-
-
     # Step D: Insights
     insights = generate_internal_insights(files_data)
     with open(os.path.join(graph_folder, "insights.json"), "w", encoding="utf-8") as f:
         json.dump(insights, f)
 
-
-
-
     # Step E: Graph HTML
     html_filename = "graph.html"
     generate_graph_html(session_id, os.path.join(graph_folder, html_filename))
-
-
-
-
-
-
-
 
     db.session.execute(
     db.text("""
@@ -704,13 +620,7 @@ def process_visualization_upload():
     )
     db.session.commit()
 
-
-
-
     graph_url = f"{BASE_URL}/graphs/{rel_path.replace(os.sep, '/')}/{html_filename}"
-
-
-
 
     upload_entry = Upload(
         project_id=new_project.id,
@@ -722,14 +632,8 @@ def process_visualization_upload():
         # relationships=relationships
     )
 
-
-
-
     db.session.add(upload_entry)
     db.session.commit()
-
-
-
 
     return api_response("Visualization Generated", {
     "project_id": new_project.id,
@@ -741,8 +645,6 @@ def process_visualization_upload():
     # "codeHealth": code_health,
     # "activeWarnings": active_warnings,
     }, 200)
-
-
 
 
 def analyze_file_metrics(content, lines):
@@ -771,8 +673,6 @@ def analyze_file_metrics(content, lines):
         "performance": round(performance, 2),
         "sizeHealth": round(size_health, 2)
     }
-
-
 
 
 def calculate_code_health(files_data):
@@ -965,8 +865,6 @@ def generate_project_warnings(files_data):
         return None
 
 
-
-
 def process_git_upload():
     data = request.json
 
@@ -974,8 +872,11 @@ def process_git_upload():
     project_name = data.get("project_name")
     repo_url = data.get("repo_url")
     branch = data.get("branch", "main")
-    token = data.get("token")  # optional (private repos)
+    token = data.get("token")  # optional
 
+    # -----------------------------
+    # BASIC VALIDATION
+    # -----------------------------
     user = db.session.get(User, user_id) if user_id else None
     if not user:
         return api_response("User not found", None, 404)
@@ -983,23 +884,41 @@ def process_git_upload():
     if not repo_url:
         return api_response("Repository URL required", None, 400)
 
+    # -----------------------------
+    # SESSION SETUP
+    # -----------------------------
     session_id = str(uuid.uuid4())
-    rel_path = os.path.join(str(user_id), session_id)
 
-    session_folder = os.path.join(UPLOAD_FOLDER, rel_path)
-    graph_folder = os.path.join(GRAPH_FOLDER, rel_path)
-    extracted_path = os.path.join(session_folder, "extracted")
+    session_folder = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
+    graph_folder = os.path.join(GRAPH_FOLDER, str(user_id), session_id)
 
     os.makedirs(session_folder, exist_ok=True)
     os.makedirs(graph_folder, exist_ok=True)
 
     # -----------------------------
-    # STEP 1: CLONE REPO
+    # STEP 1: CLONE REPO 
     # -----------------------------
-    try:
-        clone_git_repo(repo_url, extracted_path, branch, token)
-    except Exception as e:
-        return api_response("Failed to clone repository", str(e), 500)
+    clone_result = clone_git_repo(
+        repo_url=repo_url,
+        user_id=user_id,
+        session_id=session_id,
+        branch=branch,
+        token=token
+    )
+
+    if clone_result.get("statusCode") != 201:
+        return api_response("Failed to clone repository", clone_result, 500)
+
+    # extracted path MUST be resolved AFTER clone
+    extracted_path = os.path.join(
+        UPLOAD_FOLDER,
+        str(user_id),
+        session_id,
+        "extracted"
+    )
+
+    if not os.path.exists(extracted_path):
+        return api_response("Extracted repository folder not found", None, 500)
 
     # -----------------------------
     # STEP 2: CREATE PROJECT
@@ -1018,7 +937,7 @@ def process_git_upload():
     db.session.commit()
 
     # -----------------------------
-    # STEP 3: SAME PIPELINE AS ZIP
+    # STEP 3: ANALYSIS PIPELINE
     # -----------------------------
     analyzer = PythonAnalyzer()
     relationships = []
@@ -1041,19 +960,18 @@ def process_git_upload():
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as fr:
                     content = fr.read()
-            except:
+            except Exception:
                 continue
 
             rel_file = os.path.relpath(file_path, extracted_path).replace("\\", "/")
             lines = len(content.splitlines())
 
-            # AST
-            if f.endswith('.py'):
+            if f.endswith(".py"):
                 analyzer.analyze(file_path, relationships, unique_nodes)
             else:
                 unique_nodes.add(rel_file)
 
-            risk = min(100, int((content.count('if ') + content.count('for ')) * 1.5))
+            risk = min(100, int((content.count("if ") + content.count("for ")) * 1.5))
             metrics = analyze_file_metrics(content, lines)
             ext = os.path.splitext(f)[1].lower()
 
@@ -1081,7 +999,6 @@ def process_git_upload():
             ))
             db.session.commit()
 
-            # Vector DB
             collection.add(
                 documents=[content[:5000]],
                 embeddings=[embedding_model.encode(content).tolist()],
@@ -1089,7 +1006,7 @@ def process_git_upload():
             )
 
     # -----------------------------
-    # STEP 4: SAME FINALIZATION
+    # STEP 4: FINALIZATION
     # -----------------------------
     analyzed_filenames = [f["filename"] for f in files_data]
 
@@ -1104,7 +1021,6 @@ def process_git_upload():
     db.session.commit()
 
     code_health = calculate_code_health(files_data)
-    active_warnings = generate_project_warnings(files_data)
     insights = generate_internal_insights(files_data)
 
     upload_entry = Upload(
@@ -1118,7 +1034,13 @@ def process_git_upload():
     db.session.add(upload_entry)
     db.session.commit()
 
-    return api_response("Git Repository Analyzed", {
-        "project_id": new_project.id,
-        "session_id": session_id
-    }, 200)
+    return api_response(
+        "Git Repository Analyzed",
+        {
+            "project_id": new_project.id,
+            "session_id": session_id
+        },
+        200
+    )
+
+
