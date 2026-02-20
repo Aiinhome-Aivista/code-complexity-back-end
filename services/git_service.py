@@ -130,6 +130,76 @@ def pull_git_repo(user_id, session_id, branch="main"):
             auth_url = _prepare_authenticated_url(repo.remotes.origin.url, creds['git_token'])
             repo.remotes.origin.set_url(auth_url)
 
+        # 1. Fetch all branches from remote so the local repo knows about them
+        repo.remotes.origin.fetch()
+        
+        current_branch = repo.active_branch.name
+        print(f"Current branch: {current_branch}. Pulling from: {branch}")
+
+        # 2. Pull the specified branch into the current active branch
+        # This is equivalent to: git pull origin <branch>
+        repo.git.pull('origin', branch)
+
+        return {
+            "statusCode": 200, 
+            "status": "success", 
+            "message": f"Successfully merged changes from '{branch}' into '{current_branch}'"
+        }
+    except GitCommandError as e:
+        # This usually happens if there are merge conflicts
+        return {
+            "statusCode": 409, 
+            "status": "conflict", 
+            "message": f"Merge conflict or Git error: {str(e)}"
+        }
+    except Exception as e:
+        return {"statusCode": 500, "status": "error", "message": f"Pull Error: {str(e)}"}
+    try:
+        target_dir = resolve_repo_path(user_id, session_id)
+        err = _validate_local_git_path(target_dir)
+        if err: return err
+
+        creds = _get_user_git_credentials(user_id)
+        repo = Repo(target_dir)
+
+        # Update remote URL with token if available
+        if creds and creds.get('git_token'):
+            auth_url = _prepare_authenticated_url(repo.remotes.origin.url, creds['git_token'])
+            repo.remotes.origin.set_url(auth_url)
+
+        # 1. Fetch the latest metadata from the remote
+        repo.remotes.origin.fetch()
+
+        # 2. Check out the specific branch (creates it if it doesn't exist locally)
+        # This ensures we are pulling into the branch the user actually requested
+        try:
+            repo.git.checkout(branch)
+        except GitCommandError:
+            # If branch doesn't exist locally, track it from remote
+            repo.git.checkout('-b', branch, f'origin/{branch}')
+
+        # 3. Perform the pull
+        repo.remotes.origin.pull(branch)
+        
+        return {
+            "statusCode": 200, 
+            "status": "success", 
+            "message": f"Pulled successfully from branch: {branch}"
+        }
+    except Exception as e:
+        return {"statusCode": 500, "status": "error", "message": f"Pull Error: {str(e)}"}
+    try:
+        target_dir = resolve_repo_path(user_id, session_id)
+        err = _validate_local_git_path(target_dir)
+        if err: return err
+
+        creds = _get_user_git_credentials(user_id)
+        repo = Repo(target_dir)
+
+        if creds and creds.get('git_token'):
+            auth_url = _prepare_authenticated_url(repo.remotes.origin.url, creds['git_token'])
+            repo.remotes.origin.set_url(auth_url)
+
         repo.remotes.origin.pull(branch)
         return {"statusCode": 200, "status": "success", "message": "Pulled successfully"}
     except Exception as e:

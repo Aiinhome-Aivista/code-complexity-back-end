@@ -1,24 +1,21 @@
-
 import os
 from models import db
 from flask_cors import CORS
 from urllib.parse import quote_plus
+from flask import Flask, send_from_directory, request
 from controllers import git_controller
 from controllers import auth_controller
 from controllers import admin_controller
 from controllers import project_controller
 from controllers import insight_controller
 from controllers import analysis_controller
-from flask import Flask, send_from_directory, request
 from controllers import visualization_controller
 from controllers.heatmap import code_risk_heatmap
 from controllers.analysis_controller import apply_ai_fix
 from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER 
 from controllers.download_controller import download_updated_code
 from controllers.relationship_controller import get_relationship_flow
-from controllers.subscription_controller import get_all_plans,get_plans_by_user
-
-
+from controllers.subscription_controller import get_all_plans, get_plans_by_user
 
 app = Flask(__name__)
 CORS(app)
@@ -47,36 +44,29 @@ ADMIN_URL = '/api/admin'
 INSIGHT_URL = '/api/insights'
 VIZ_URL = '/api/visualization'
 
-# # --- STATIC FILE SERVING ---
-# # 1. Serve Uploaded Files
+# --- STATIC FILE SERVING ---
 @app.route('/uploads/<user_id>/<session_id>/extracted/<path:filename>')
 def serve_extracted_file(user_id, session_id, filename):
-    # Base directory for this session's extracted files
     base_dir = os.path.join(UPLOAD_FOLDER, str(user_id), session_id, 'extracted')
-    
-    # 1. Try exact match (e.g. app.py)
     full_path = os.path.join(base_dir, filename)
     if os.path.exists(full_path):
         return send_from_directory(os.path.dirname(full_path), os.path.basename(full_path))
 
-    # 2. Smart Search: Look inside subfolders (e.g. controllers/auth_controller.py)
     search_filename = os.path.basename(filename)
     for root, dirs, files in os.walk(base_dir):
         if search_filename in files:
             return send_from_directory(root, search_filename)
 
-    # 3. Fallback to session root
     session_root = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
     if os.path.exists(os.path.join(session_root, search_filename)):
         return send_from_directory(session_root, search_filename)
 
-
-# 2. Serve Generated Graphs (NEW)
 @app.route('/graphs/<path:filename>')
 def serve_graph_files(filename):
     return send_from_directory(GRAPH_FOLDER, filename)
 
 # --- ROUTES ---
+
 @app.route(AUTH_URL + '/register', methods=['POST'])
 def register(): 
     return auth_controller.register()
@@ -113,84 +103,69 @@ def delete_project(project_id):
 def generate_insights(): 
     return insight_controller.generate_project_insights()
 
-# --- Visualization Pipeline ---
 @app.route(VIZ_URL + '/upload', methods=['POST'])
 def generate_visualization(): 
     return visualization_controller.process_visualization_upload()
 
-# Git repository upload
 @app.route(VIZ_URL + '/upload_git', methods=['POST'])
 def generate_visualization_from_git():
     return visualization_controller.process_git_upload()    
-
 
 @app.route(ANALYSIS_URL + '/analyze_project_ai', methods=['POST'])
 def analyze_project_ai(): 
     return analysis_controller.analyze_project_ai()
 
-
 @app.route(ANALYSIS_URL + "/code_heatmap", methods=["POST"])
 def code_risk_heatmap_controller():
     return code_risk_heatmap()
 
-
-
-# --- DEPENDENCY GRAPH ROUTE ---
-# @app.route(ANALYSIS_URL + '/dependency_graph', methods=['POST'])
-# def dependency_graph_route():
-#     return get_project_dependencies()
-
-# --- DOWNLOAD ROUTE ---
 @app.route(ANALYSIS_URL + '/download_updated_code', methods=['GET'])
 def download_code_route():
     return download_updated_code()
-
 
 @app.route(ANALYSIS_URL + "/relationships_flow", methods=["POST"])
 def get_relationship_flow_controller():
     return get_relationship_flow()
 
-
 @app.route(ANALYSIS_URL + "/apply-ai-fix", methods=["POST"])
 def apply_fix_route():
     return apply_ai_fix()
 
+# --- GIT & TERMINAL ROUTES ---
 
-
-
-
-@app.route(ANALYSIS_URL + "/clone",methods=["POST"])
+@app.route(ANALYSIS_URL + "/clone", methods=["POST"])
 def clone():
     return git_controller.clone()
 
-@app.route(ANALYSIS_URL + "/pull",methods=["POST"])
+@app.route(ANALYSIS_URL + "/pull", methods=["POST"])
 def pull():
     return git_controller.pull()
 
-@app.route(ANALYSIS_URL + "/push",methods=["POST"])
+@app.route(ANALYSIS_URL + "/push", methods=["POST"])
 def push():
     return git_controller.push()
 
-@app.route('/api/fetch_git_config/<int:user_id>', methods=['GET'])
+@app.route(ANALYSIS_URL + "/terminal", methods=["POST"])
+def terminal_route():
+    """New REST endpoint for the terminal"""
+    return git_controller.terminal_api_handler()
+
+@app.route(ANALYSIS_URL + "/fetch_git_config/<int:user_id>", methods=['GET'])
 def api_get_git(user_id):
     return git_controller.get_git_info(user_id)
 
-@app.route('/api/update_git_config/<int:user_id>', methods=['PUT'])
+@app.route(ANALYSIS_URL + "/update_git_config/<int:user_id>", methods=['PUT'])
 def api_update_git(user_id):
     data = request.json
     return git_controller.update_git_info(user_id, data)
 
-@app.route('/api/plans', methods=['GET'])
+@app.route(ANALYSIS_URL + "/plans", methods=['GET'])
 def api_get_all_plans():
     return get_all_plans()
 
-@app.route('/api/plans/user/<int:user_id>', methods=['GET'])
+@app.route(ANALYSIS_URL + "/plans/user/<int:user_id>", methods=['GET'])
 def api_get_plans_by_user(user_id):
     return get_plans_by_user(user_id)
 
-
-
 if __name__ == "__main__":  
     app.run(host="0.0.0.0", port=3019, debug=True)
-
-
