@@ -5,7 +5,7 @@ import os
 from flask import request, jsonify
 from config import MYSQL_CONFIG
 from services.git_service import (
-    clone_git_repo, 
+    # clone_git_repo, 
     pull_git_repo, 
     push_git_repo, 
     resolve_repo_path
@@ -44,9 +44,9 @@ def update_git_info(user_id, data):
         cursor = conn.cursor(dictionary=True)
 
         # Ensure email isn't stolen by another user ID
-        cursor.execute("SELECT id FROM users WHERE git_email=%s AND id != %s", (git_email, user_id))
-        if cursor.fetchone():
-            return jsonify({"error": "git_email already used by another user"}), 400
+        # cursor.execute("SELECT id FROM users WHERE git_email=%s AND id != %s", (git_email, user_id))
+        # if cursor.fetchone():
+        #     return jsonify({"error": "git_email already used by another user"}), 400
 
         # Update the user record
         cursor.execute("""
@@ -85,19 +85,19 @@ def get_git_info(user_id):
 # GIT AUTOMATION (REST API)
 # =====================================================
 
-def clone():
-    data = request.json or {}
-    user_id = data.get("user_id")
-    session_id = data.get("session_id")
-    repo_url = data.get("repo_url")
-    branch = data.get("branch", "main")
-    token = data.get("token")
+# def clone():
+#     data = request.json or {}
+#     user_id = data.get("user_id")
+#     session_id = data.get("session_id")
+#     repo_url = data.get("repo_url")
+#     branch = data.get("branch", "main")
+#     token = data.get("token")
 
-    if not all([user_id, session_id, repo_url]):
-        return jsonify({"message": {"statusCode": 400, "message": "Missing required fields"}}), 400
+#     if not all([user_id, session_id, repo_url]):
+#         return jsonify({"message": {"statusCode": 400, "message": "Missing required fields"}}), 400
 
-    result = clone_git_repo(repo_url, user_id, session_id, branch, token)
-    return jsonify({"message": result}), result.get("statusCode", 200)
+#     result = clone_git_repo(repo_url, user_id, session_id, branch, token)
+#     return jsonify({"message": result}), result.get("statusCode", 200)
 
 def pull():
     data = request.json or {}

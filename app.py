@@ -1,8 +1,45 @@
 import os
-from models import db
+from flask import Flask, send_from_directory, request
 from flask_cors import CORS
 from urllib.parse import quote_plus
-from flask import Flask, send_from_directory, request
+from extensions import db, mail
+from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER, Config
+from services.subscription_service import upgrade_to_premium 
+from flask_login import current_user , login_required
+# -------------------------------
+# Create App
+# -------------------------------
+app = Flask(__name__)
+CORS(app)
+
+# -------------------------------
+# Load Config
+# -------------------------------
+app.config.from_object(Config)
+
+encoded_pass = quote_plus(MYSQL_CONFIG['password'])
+app.config['SQLALCHEMY_DATABASE_URI'] = (
+    f"mysql+mysqlconnector://{MYSQL_CONFIG['user']}:{encoded_pass}"
+    f"@{MYSQL_CONFIG['host']}:{MYSQL_CONFIG['port']}/{MYSQL_CONFIG['database']}"
+)
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# -------------------------------
+# Initialize Extensions
+# -------------------------------
+db.init_app(app)
+mail.init_app(app)
+
+# -------------------------------
+# Register Models (IMPORTANT)
+# -------------------------------
+with app.app_context():
+    import models
+    db.create_all()
+
+# -------------------------------
+# NOW Import Controllers (IMPORTANT)
+# -------------------------------
 from controllers import git_controller
 from controllers import auth_controller
 from controllers import admin_controller
@@ -12,31 +49,13 @@ from controllers import analysis_controller
 from controllers import visualization_controller
 from controllers.heatmap import code_risk_heatmap
 from controllers.analysis_controller import apply_ai_fix
-from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER 
 from controllers.download_controller import download_updated_code
 from controllers.relationship_controller import get_relationship_flow
 from controllers.subscription_controller import get_all_plans, get_plans_by_user
 
-app = Flask(__name__)
-CORS(app)
-
-# Database Connection
-encoded_pass = quote_plus(MYSQL_CONFIG['password'])
-app.config['SQLALCHEMY_DATABASE_URI'] = (
-    f"mysql+mysqlconnector://{MYSQL_CONFIG['user']}:{encoded_pass}"
-    f"@{MYSQL_CONFIG['host']}:{MYSQL_CONFIG['port']}/{MYSQL_CONFIG['database']}"
-)
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
-# Ensure Folders Exist
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(GRAPH_FOLDER, exist_ok=True) 
-
-db.init_app(app)
-with app.app_context():
-    db.create_all()
-
-# --- URL CONSTANTS ---
+# -------------------------------
+# URL Constants
+# -------------------------------
 AUTH_URL = '/api/auth'
 ANALYSIS_URL = '/api'
 PROJECT_URL = '/api/projects'
@@ -44,6 +63,11 @@ ADMIN_URL = '/api/admin'
 INSIGHT_URL = '/api/insights'
 VIZ_URL = '/api/visualization'
 
+# -------------------------------
+# Ensure Folders Exist
+# -------------------------------
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(GRAPH_FOLDER, exist_ok=True)
 # --- STATIC FILE SERVING ---
 @app.route('/uploads/<user_id>/<session_id>/extracted/<path:filename>')
 def serve_extracted_file(user_id, session_id, filename):
@@ -74,6 +98,10 @@ def register():
 @app.route(AUTH_URL + '/login', methods=['POST'])
 def login(): 
     return auth_controller.login()
+
+@app.route('/activate/<token>', methods=['GET'])
+def activate_account(token):
+    return auth_controller.activate_account(token)    
 
 @app.route(ANALYSIS_URL + '/analyze', methods=['POST'])
 def analyze_upload(): 
@@ -166,6 +194,21 @@ def api_get_all_plans():
 @app.route(ANALYSIS_URL + "/plans/user/<int:user_id>", methods=['GET'])
 def api_get_plans_by_user(user_id):
     return get_plans_by_user(user_id)
+
+@app.route("/upgrade_account", methods=["POST"])
+def upgrade():
+    data = request.get_json()
+    user_id = data.get("user_id") # Get ID from the JSON body
+    
+    if not user_id:
+        return {"error": "User ID is required"}, 400
+        
+    success, message = upgrade_to_premium(user_id)
+    if not success:
+        return {"error": message}, 400
+        
+    return {"message": message}, 200
+   
 
 if __name__ == "__main__":  
     app.run(host="0.0.0.0", port=3019, debug=True)

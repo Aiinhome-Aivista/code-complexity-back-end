@@ -77,12 +77,25 @@ def _get_user_git_credentials(user_id):
         return None
 
 def _prepare_authenticated_url(url, token):
-    """Injects the token into the HTTPS URL."""
+    """Injects token safely into HTTPS URL."""
+    
+    if not token or not isinstance(token, str):
+        return url  # No token? Return original URL safely
+
+    token = token.strip()
+
     if not token:
         return url
-    clean_url = url.split("@")[-1] if "@" in url else url.replace("https://", "")
-    return f"https://{token}@{clean_url}"
 
+    if not url.startswith("https://"):
+        return url  # Only modify HTTPS URLs
+
+    # Remove existing credentials if present
+    clean_url = url.replace("https://", "")
+    if "@" in clean_url:
+        clean_url = clean_url.split("@")[-1]
+
+    return f"https://{token}@{clean_url}"
 def _validate_local_git_path(target_dir):
     """Checks if the local directory is a valid git repo."""
     if not os.path.exists(target_dir):
@@ -95,28 +108,41 @@ def _validate_local_git_path(target_dir):
 # CORE FUNCTIONS (Exported to Controller)
 # =====================================================
 
-def clone_git_repo(repo_url, user_id, session_id, branch="main", token=None):
+def clone_git_repo(repo_url, user_id, session_id, branch=None, token=None):
     try:
         target_dir = resolve_repo_path(user_id, session_id)
+
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
+
         os.makedirs(target_dir, exist_ok=True)
 
         creds = _get_user_git_credentials(user_id)
-        active_token = token or (creds.get('git_token') if creds else None)
-        
+
+        active_token = None
+        if token and isinstance(token, str) and token.strip():
+            active_token = token.strip()
+        elif creds and creds.get("git_token"):
+            active_token = creds.get("git_token")
+
         auth_url = _prepare_authenticated_url(repo_url, active_token)
-        repo = Repo.clone_from(auth_url, target_dir, branch=branch, depth=1)
 
-        if creds:
-            with repo.config_writer() as cw:
-                cw.set_value("user", "name", creds['git_username'])
-                cw.set_value("user", "email", creds['git_email'])
+        # 🔥 DO NOT force branch here
+        repo = Repo.clone_from(auth_url, target_dir, depth=1)
 
-        return {"statusCode": 201, "status": "success", "message": "Cloned and configured"}
+        return {
+            "statusCode": 201,
+            "status": "success",
+            "message": "Cloned successfully"
+        }
+
     except Exception as e:
-        return {"statusCode": 500, "status": "error", "message": f"Clone Error: {str(e)}"}
-
+        print("FULL CLONE ERROR:", repr(e))
+        return {
+            "statusCode": 500,
+            "status": "error",
+            "message": f"Clone Error: {str(e)}"
+        }
 def pull_git_repo(user_id, session_id, branch="main"):
     try:
         target_dir = resolve_repo_path(user_id, session_id)
