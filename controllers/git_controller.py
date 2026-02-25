@@ -83,10 +83,10 @@ def initiate_git_upload():
     """
     data = request.json or {}
 
-    user_id     = data.get("user_id")
+    user_id      = data.get("user_id")
     project_name = data.get("project_name")
-    repo_url    = data.get("repo_url")
-    token       = data.get("token")          # optional PAT / OAuth token
+    repo_url     = data.get("repo_url")
+    # token is NOT taken from payload — it is read from the user's DB profile automatically
 
     # ── Validation ──────────────────────────────────────────────────────────
     user = db.session.get(User, user_id) if user_id else None
@@ -103,13 +103,12 @@ def initiate_git_upload():
     os.makedirs(session_folder, exist_ok=True)
     os.makedirs(graph_folder,   exist_ok=True)
 
-    # ── Clone (default branch) ───────────────────────────────────────────────
+    # ── Clone (default remote HEAD branch) ───────────────────────────────────
     clone_result = clone_git_repo(
         repo_url=repo_url,
         user_id=user_id,
-        session_id=session_id,
-        token=token
-        # branch omitted → gitpython uses the remote HEAD (usually main/master)
+        session_id=session_id
+        # branch & token omitted — service picks up DB token & remote HEAD
     )
 
     if clone_result.get("statusCode") != 201:

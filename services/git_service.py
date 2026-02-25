@@ -95,7 +95,7 @@ def _validate_local_git_path(target_dir):
 # CORE FUNCTIONS (Exported to Controller)
 # =====================================================
 
-def clone_git_repo(repo_url, user_id, session_id, branch="main", token=None):
+def clone_git_repo(repo_url, user_id, session_id, branch=None, token=None):
     try:
         target_dir = resolve_repo_path(user_id, session_id)
         if os.path.exists(target_dir):
@@ -103,15 +103,24 @@ def clone_git_repo(repo_url, user_id, session_id, branch="main", token=None):
         os.makedirs(target_dir, exist_ok=True)
 
         creds = _get_user_git_credentials(user_id)
-        active_token = token or (creds.get('git_token') if creds else None)
-        
+        # Token: prefer DB-stored token; payload token is no longer used
+        active_token = creds.get('git_token') if creds else None
+
         auth_url = _prepare_authenticated_url(repo_url, active_token)
-        repo = Repo.clone_from(auth_url, target_dir, branch=branch, depth=1)
+
+        # Clone without depth limit so ALL remote refs are accessible
+        clone_kwargs = {}
+        if branch:
+            clone_kwargs["branch"] = branch
+        repo = Repo.clone_from(auth_url, target_dir, **clone_kwargs)
+
+        # Fetch all remote refs so every branch is visible immediately
+        repo.remotes.origin.fetch()
 
         if creds:
             with repo.config_writer() as cw:
-                cw.set_value("user", "name", creds['git_username'])
-                cw.set_value("user", "email", creds['git_email'])
+                cw.set_value("user", "name", creds['git_username'] or "API_User")
+                cw.set_value("user", "email", creds['git_email'] or "api@example.com")
 
         return {"statusCode": 201, "status": "success", "message": "Cloned and configured"}
     except Exception as e:
@@ -170,6 +179,7 @@ def push_git_repo(user_id, session_id, commit_message="Update from API"):
 def list_branches(user_id, session_id):
     """
     Returns all available remote branches for the cloned repo.
+    Fetches latest remote refs first to ensure the list is complete.
     """
     try:
         target_dir = resolve_repo_path(user_id, session_id)
@@ -178,8 +188,19 @@ def list_branches(user_id, session_id):
             return err
 
         repo = Repo(target_dir)
-        branches = [ref.remote_head for ref in repo.remotes.origin.refs
-                    if ref.remote_head != "HEAD"]
+
+        # Re-auth fetch so private repo tokens are used
+        creds = _get_user_git_credentials(user_id)
+        if creds and creds.get("git_token"):
+            auth_url = _prepare_authenticated_url(repo.remotes.origin.url, creds["git_token"])
+            repo.remotes.origin.set_url(auth_url)
+        repo.remotes.origin.fetch()
+
+        branches = sorted([
+            ref.remote_head
+            for ref in repo.remotes.origin.refs
+            if ref.remote_head != "HEAD"
+        ])
         return {
             "statusCode": 200,
             "status": "success",
