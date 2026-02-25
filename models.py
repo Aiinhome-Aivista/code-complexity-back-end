@@ -1,8 +1,7 @@
-from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from extensions import db
 
-db = SQLAlchemy()
-
+# --- User Table ---
 class User(db.Model):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
@@ -11,8 +10,12 @@ class User(db.Model):
     password_hash = db.Column(db.String(256), nullable=False)
     subscription_tier = db.Column(db.String(20), default='free')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    is_active = db.Column(db.Boolean, default=False)
+    
+    # Relationships
     projects = db.relationship('Project', backref='user', lazy=True)
 
+# --- Project Table ---
 class Project(db.Model):
     __tablename__ = "projects"
 
@@ -28,12 +31,9 @@ class Project(db.Model):
     relationship_status = db.Column(db.String(50), default="PENDING")
     heatmap_status = db.Column(db.String(50), default="PENDING")
 
-    created_at = db.Column(
-        db.DateTime,
-        default=datetime.utcnow,
-        nullable=False
-    )
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
+# --- File Analysis Table ---
 class FileAnalysis(db.Model):
     __tablename__ = 'file_analysis'
     id = db.Column(db.Integer, primary_key=True)
@@ -42,7 +42,6 @@ class FileAnalysis(db.Model):
     content = db.Column(db.Text)
     applied_fixes = db.Column(db.JSON, default=list)
 
-    
     # Metrics
     complexity = db.Column(db.Integer)
     security_issues = db.Column(db.Integer)
@@ -66,22 +65,15 @@ class FileAnalysis(db.Model):
             "apis": self.api_json
         }
 
-
-
+# --- Results/Upload Table ---
 class Upload(db.Model):
     __tablename__ = "upload"
 
-
     id = db.Column(db.Integer, primary_key=True)
-
-
     project_id = db.Column(db.Integer, nullable=False)
     session_id = db.Column(db.String(50), nullable=False)
 
-
     graph_url = db.Column(db.Text)
-
-
     codeHealth = db.Column(db.JSON)
     endpointHealth = db.Column(db.JSON)
     files = db.Column(db.JSON)
@@ -90,21 +82,18 @@ class Upload(db.Model):
     heatmap = db.Column(db.JSON)
     analyze_data = db.Column(db.JSON) 
 
-
     created_at = db.Column(db.DateTime, default=db.func.now())
 
-
-# --- Token Usage Table (MISSING CLASS ADDED HERE) ---
+# --- Token Usage Tracking ---
 class TokenUsage(db.Model):
     __tablename__ = 'token_usage'
-
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     session_id = db.Column(db.String(50), nullable=True)
    
-    provider = db.Column(db.String(50), nullable=False)    # 'gemini', 'mistral_cloud'
-    model_name = db.Column(db.String(100), nullable=False) # 'gemini-1.5-flash'
+    provider = db.Column(db.String(50), nullable=False)    # 'gemini', 'mistral'
+    model_name = db.Column(db.String(100), nullable=False) 
    
     input_tokens = db.Column(db.Integer, default=0)
     output_tokens = db.Column(db.Integer, default=0)
@@ -113,10 +102,10 @@ class TokenUsage(db.Model):
     estimated_cost = db.Column(db.Float, default=0.0)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
-
     def __repr__(self):
         return f"<TokenUsage {self.provider} | {self.total_tokens} tokens>"
 
+# --- Applied Fixes Tracker ---
 class AppliedFix(db.Model):
     __tablename__ = "applied_fix"
 
@@ -126,4 +115,65 @@ class AppliedFix(db.Model):
     modified_code = db.Column(db.JSON, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
+# --- Plan Table (The Core for your API Logic) ---
+class Plan(db.Model):
+    __tablename__ = "plans"
 
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)  # 'FREE' or 'PREMIUM'
+    description = db.Column(db.Text, nullable=True) # Added description column
+    
+    max_upload_size = db.Column(db.BigInteger, nullable=False)  # in bytes
+    git_access = db.Column(db.Boolean, default=False)
+
+    price = db.Column(db.Float, default=0.0)
+    duration_days = db.Column(db.Integer, nullable=True)  # Null for Free
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    unit = db.Column(db.Enum('MB', 'KB', name='unit_enum'), nullable=True)
+
+    # Relationships
+    subscriptions = db.relationship('UserSubscription', backref='plan', lazy=True)
+
+    def __repr__(self):
+        return f"<Plan {self.name}>"
+
+# --- User Subscription Junction Table ---
+class UserSubscription(db.Model):
+    __tablename__ = "user_subscriptions"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    plan_id = db.Column(db.Integer, db.ForeignKey('plans.id'), nullable=False)
+
+    start_date = db.Column(db.DateTime, default=datetime.utcnow)
+    end_date = db.Column(db.DateTime, nullable=True)
+
+    status = db.Column(
+        db.Enum('active', 'expired', 'cancelled', name='subscription_status'),
+        default='active'
+    )
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationship back to User
+    user = db.relationship('User', backref=db.backref('subscriptions', lazy=True))
+
+    def is_active(self):
+        """Logic to determine if the subscription is still valid."""
+        if self.status != "active":
+            return False
+        
+        # Check if subscription has expired
+        if self.end_date and self.end_date < datetime.utcnow():
+            self.status = "expired"
+            # Note: Committing here assumes an active DB context
+            try:
+                db.session.commit()
+            except:
+                db.session.rollback()
+            return False
+        return True
+
+    def __repr__(self):
+        return f"<UserSubscription User:{self.user_id} Plan:{self.plan_id}>"

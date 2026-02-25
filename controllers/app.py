@@ -135,6 +135,9 @@ def generate_insights():
 def generate_visualization(): 
     return visualization_controller.process_visualization_upload()
 
+@app.route(VIZ_URL + '/upload_git', methods=['POST'])
+def generate_visualization_from_git():
+    return visualization_controller.process_git_upload()    
 
 @app.route(ANALYSIS_URL + '/analyze_project_ai', methods=['POST'])
 def analyze_project_ai(): 
@@ -206,23 +209,6 @@ def upgrade():
         
     return {"message": message}, 200
    
-
-# Git repository upload — Step 1: clone only, return branch list
-@app.route(VIZ_URL + '/upload_git', methods=['POST'])
-def generate_visualization_from_git():
-    return git_controller.initiate_git_upload()
-
-# Git repository upload — Step 2: select branch → analyse
-@app.route(VIZ_URL + '/select_branch', methods=['POST'])
-def select_branch_and_analyze():
-    return git_controller.select_branch_and_analyze()
-
-
-@app.route(AUTH_URL + '/get-captcha', methods=['GET'])
-def get_captcha(): 
-    return auth_controller.get_captcha()
-
-
 
 if __name__ == "__main__":  
     app.run(host="0.0.0.0", port=3019, debug=True)

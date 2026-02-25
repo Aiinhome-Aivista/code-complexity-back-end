@@ -1,5 +1,3 @@
-
-
 import re
 import os
 import ast
@@ -11,7 +9,6 @@ import chromadb
 from google import genai
 from flask import request
 from models import Upload
-
 from utils.response import api_response
 from werkzeug.utils import secure_filename
 from utils.file_utils import handle_zip_upload
@@ -33,7 +30,6 @@ def get_chroma_client():
 client = None
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
-
 
 class PythonAnalyzer:
     IGNORE_LIST = {
@@ -70,64 +66,97 @@ class PythonAnalyzer:
                         file_list.add(module)
 
 
-
-
 # --- REPLACE THIS FUNCTION ---
 def generate_internal_insights(files_data):
     try:
-        # 1. Prepare Summary
-        summary = "\n".join([f"- {f['filename']} (LOC: {f.get('lines_of_code', 0)}, Risk: {f.get('risk_score', 0)})" for f in files_data[:20]])
-       
-        prompt = f"""
-        Analyze this project structure and metrics:
-        {summary}
-       
-        Provide 3 concise architectural insights or risks.
-        Return ONLY a raw JSON object with a single key "insights".
-       
-        Example: {{ "insights": ["Insight 1...", "Insight 2...", "Insight 3..."] }}
+        # --- 1. PROJECT-LEVEL SUMMARY ---
+        total_files = len(files_data)
+        total_loc = sum(f.get('lines_of_code', 0) for f in files_data)
+
+
+        avg_risk = round(
+            sum(f.get('risk_score', 0) for f in files_data) / total_files, 2
+        ) if total_files else 0
+
+
+        summary = f"""
+        Project Overview:
+        - Total source files: {total_files}
+        - Total lines of code: {total_loc}
+        - Average risk score: {avg_risk}
         """
-        print(f"🤖 Generating Internal Insights using: {ACTIVE_LLM}")
+        # --- 2. STRONGER ARCHITECTURAL PROMPT ---
+        prompt = f"""
+        You are a senior software architect performing a high-level technical assessment.
+        Analyze the OVERALL SOFTWARE PROJECT using the summary below:
+        {summary}
+
+
+        STRICT RULES:
+        - Do NOT mention file names, controllers, services, or modules
+        - Do NOT reference LOC explicitly in the insights
+        - Speak only about the project as a whole
+        - Provide meaningful architectural observations, not generic statements
+        - Each insight must be 2–3 lines long and provide real value
+        Focus on:
+        - Architecture maturity
+        - Scalability readiness
+        - Maintainability
+        - Technical debt
+        - Structural risk patterns
+
+
+        Provide exactly 5 well-written project-level insights.
+
+
+        Return ONLY raw JSON in this format:
+        {{ "insights": ["Insight 1", "Insight 2", "Insight 3", "Insight 4", "Insight 5"] }}
+        """
+
+
+        print(f"🤖 Generating Enhanced Project Insights using: {ACTIVE_LLM}")
         response_text = ""
 
-        # === OPTION A: GEMINI ===
+
+        # === GEMINI ===
         if ACTIVE_LLM == "gemini":
             if not GEMINI_API_KEY:
-                print("❌ Gemini API Key missing for insights")
-                return ["Gemini Key missing."]
-           
+                return ["Gemini API Key missing."]
             resp = client.models.generate_content(
                 model=MODEL_NAME,
                 contents=prompt
             )
             response_text = resp.text
 
-        # === OPTION B: MISTRAL CLOUD ===
+
+        # === MISTRAL CLOUD ===
         elif ACTIVE_LLM == "mistral_cloud":
             if not MISTRAL_API_KEY:
-                print("❌ Mistral API Key missing for insights")
-                return ["Mistral Key missing."]
-               
+                return ["Mistral API Key missing."]
+
             headers = {
                 "Authorization": f"Bearer {MISTRAL_API_KEY}",
                 "Content-Type": "application/json"
             }
+
             payload = {
                 "model": MISTRAL_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": {"type": "json_object"}
             }
-            resp = requests.post("https://api.mistral.ai/v1/chat/completions", json=payload, headers=headers)
-           
+
+            resp = requests.post(
+                "https://api.mistral.ai/v1/chat/completions",
+                json=payload,
+                headers=headers
+            )
+
             if resp.status_code == 200:
                 response_text = resp.json()['choices'][0]['message']['content']
             else:
-                print(f"❌ Mistral Insights Error: {resp.text}")
                 return [f"Mistral Error: {resp.status_code}"]
 
-
-
-        # === OPTION C: MISTRAL LOCAL ===
+        # === MISTRAL LOCAL ===
         elif ACTIVE_LLM == "mistral_local":
             payload = {
                 "model": "mistral",
@@ -135,42 +164,35 @@ def generate_internal_insights(files_data):
                 "stream": False,
                 "format": "json"
             }
+
             try:
-                resp = requests.post(MISTRAL_API_URL, json=payload, timeout=MISTRAL_TIMEOUT)
+                resp = requests.post(
+                    MISTRAL_API_URL,
+                    json=payload,
+                    timeout=MISTRAL_TIMEOUT
+                )
+
                 if resp.status_code == 200:
                     response_text = resp.json().get('response', '')
                 else:
-                    print(f"❌ Local AI Insights Error: {resp.text}")
                     return ["Local AI Error."]
-            except Exception as e:
-                print(f"❌ Local AI Unreachable: {e}")
+            except Exception:
                 return ["Local AI Unreachable."]
-
-
-
-
         else:
-            return ["Invalid AI Configuration."]
-
-
-
-
-        # --- 3. CLEAN & PARSE JSON ---
+            return ["Invalid AI configuration."]
+        # --- CLEAN & PARSE ---
         cleaned_text = response_text.replace("```json", "").replace("```", "").strip()
-        if not cleaned_text: return ["AI returned empty response."]
 
-
-
+        if not cleaned_text:
+            return ["AI returned empty response."]
 
         data = json.loads(cleaned_text)
-        return data.get('insights', ["No insights found in JSON."])
 
-
-
+        return data.get("insights", ["No insights generated."])
 
     except Exception as e:
-        print(f"❌ Insights Generation Critical Error: {str(e)}") # <--- Now you will see the error in terminal
-        return ["AI Analysis unavailable due to error."]
+        print(f"❌ Project Insight Generation Error: {str(e)}")
+        return ["AI analysis unavailable."]
 
 
 def enhance_reason_impact(metric, reason, impact, score):
@@ -369,8 +391,12 @@ def generate_health_explanations(files_data, ratings):
         print(f"❌ AI Explanation Critical Error: {str(e)}")
         return {k: {"reason": "Analysis failed."} for k in ratings}
 
-
-
+def get_folder_size(path):
+    total = 0
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            total += os.path.getsize(os.path.join(root, f))
+    return total
 
 def process_visualization_upload():
     if 'files' not in request.files: return api_response("No files", None, 400)
@@ -380,6 +406,32 @@ def process_visualization_upload():
 
 
     if not user: return api_response("User not found", None, 404)
+
+    # -----------------------------
+    # PLAN-BASED SIZE LIMIT
+    # -----------------------------
+    plan = str(getattr(user, "subscription_tier", "FREE")).upper()
+
+    if plan == "PREMIUM":
+        max_size_bytes = 20 * 1024 * 1024   # 20 MB
+    else:
+        max_size_bytes = 10 * 1024          # 10 KB
+
+    uploaded_files = request.files.getlist('files')
+
+    # SIZE CHECK
+    total_size = 0
+    for f in uploaded_files:
+        f.seek(0, os.SEEK_END)
+        total_size += f.tell()
+        f.seek(0)
+
+    if total_size > max_size_bytes:
+        return api_response(
+            f"Upload limit exceeded.Please Upgrade Your Plan",
+            None,
+            400
+        )
    
     session_id = str(uuid.uuid4())
     rel_path = os.path.join(str(user_id), session_id)
@@ -389,24 +441,41 @@ def process_visualization_upload():
     os.makedirs(session_folder, exist_ok=True)
     os.makedirs(graph_folder, exist_ok=True)
 
-
-
-
-    uploaded_files = request.files.getlist('files')
+    # uploaded_files = request.files.getlist('files')
     scan_path = session_folder
    
     if len(uploaded_files) == 1 and uploaded_files[0].filename.endswith('.zip'):
+
         zip_file = uploaded_files[0]
+
+        # 1️⃣ Save zip first
         save_path = os.path.join(session_folder, secure_filename(zip_file.filename))
         zip_file.save(save_path)
-        handle_zip_upload(save_path, os.path.join(session_folder, "extracted"))
-        scan_path = os.path.join(session_folder, "extracted")
+
+        # 2️⃣ Extract
+        extracted_path = os.path.join(session_folder, "extracted")
+        handle_zip_upload(save_path, extracted_path)
+
+        scan_path = extracted_path
+
+        # 3️⃣ Check extracted size
+        extracted_size = get_folder_size(scan_path)
+
+        if extracted_size > max_size_bytes:
+            return api_response(
+                f"Extracted project exceeds your plan limit ({max_size_bytes // (1024*1024)} MB).",
+                None,
+                400
+            )
+
+        # zip_file = uploaded_files[0]
+        # save_path = os.path.join(session_folder, secure_filename(zip_file.filename))
+        # zip_file.save(save_path)
+        # handle_zip_upload(save_path, os.path.join(session_folder, "extracted"))
+        # scan_path = os.path.join(session_folder, "extracted")
     else:
         for f in uploaded_files:
             if f.filename: f.save(os.path.join(session_folder, secure_filename(f.filename)))
-
-
-
 
     # FIX 1: Commit Project Immediately
     new_project = Project(
@@ -419,11 +488,6 @@ def process_visualization_upload():
     relationship_status="PENDING"
     ) 
 
-
-
-
-
-
     db.session.add(new_project)
     try:
         db.session.commit()
@@ -431,18 +495,12 @@ def process_visualization_upload():
         db.session.rollback()
         return api_response(f"Database Error: {str(e)}", None, 500)
 
-
-
-
     analyzer = PythonAnalyzer()
     relationships = []
     unique_nodes = set()
     files_data = []
     embedding_model = get_embedding_model()
     collection = get_chroma_client().get_or_create_collection(name=f"session_{session_id}")
-
-
-
 
     for root, dirs, files in os.walk(scan_path):
         for f in files:
@@ -453,9 +511,6 @@ def process_visualization_upload():
             if f.endswith('.py'): analyzer.analyze(file_path, relationships, unique_nodes)
             else: unique_nodes.add(filename)
 
-
-
-
             # Step B: Metadata & Database
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as fr: content = fr.read()
@@ -464,18 +519,7 @@ def process_visualization_upload():
                 folder = os.path.relpath(root, scan_path)
                 if folder == '.': folder = "Root"
 
-
-
-
-                metrics = analyze_file_metrics(content, lines)
-
-
-
-
                 ext = os.path.splitext(filename)[1].lower()
-
-
-
 
                 files_data.append({
                     "id": filename,
@@ -484,12 +528,8 @@ def process_visualization_upload():
                     "folder": folder,
                     "lines_of_code": lines,
                     "risk_score": risk,
-                    "metrics": metrics,
                     "content": content      
                 })
-
-
-
 
                 # FIX 2: Commit Each File Individually to keep connection alive
                 db.session.add(FileAnalysis(
@@ -505,9 +545,6 @@ def process_visualization_upload():
                 ))
                 db.session.commit() # Commit per file
 
-
-
-
                 # Add to VectorDB
                 collection.add(documents=[content[:5000]], embeddings=[embedding_model.encode(content).tolist()], ids=[f"{session_id}_{filename}"])
             except Exception as e:
@@ -515,18 +552,9 @@ def process_visualization_upload():
                 db.session.rollback() # Rollback only this file, continue loop
 
 
-
-
-
-
-
-
     analyzed_filenames = [f["filename"] for f in files_data]
     print("ANALYZED_FILES =", analyzed_filenames)
     print("PROJECT_ID =", new_project.id)
-
-
-
 
     result = db.session.execute(
         db.text("""
@@ -543,15 +571,19 @@ def process_visualization_upload():
     db.session.commit()
 
 
+    if files_data:
+        baseline = compute_project_baseline(files_data)
 
+        for f in files_data:
+            f["metrics"] = analyze_file_metrics(
+                f["content"],
+                f["lines_of_code"],
+                baseline
+            )
 
-    code_health = calculate_code_health(files_data)
-
-
-
-
-
-
+        code_health = calculate_code_health(files_data)
+    else:
+        code_health = None
 
 
     # --- MODIFIED: AI Explanation Logic with new structure ---
@@ -577,9 +609,6 @@ def process_visualization_upload():
        
         code_health['ratings'] = enhanced_ratings
 
-
-
-
         # --- NEW: Generate Active Warnings ---
     print("Generating Active Warnings...")
     active_warnings = generate_project_warnings(files_data)
@@ -591,7 +620,6 @@ def process_visualization_upload():
             "performance_risks": {"count": 0, "items": [], "description": "Analysis unavailable"}
         }
  
-   
     db.session.execute(
     db.text("""
         UPDATE projects
@@ -601,9 +629,6 @@ def process_visualization_upload():
     {"pid": new_project.id}
     )
     db.session.commit()
-
-
-
 
     db.session.execute(
     db.text("""
@@ -615,22 +640,13 @@ def process_visualization_upload():
     )
     db.session.commit()
 
-
-
-
     # Step C: ArangoDB
     final_nodes = []
     for node_name in unique_nodes:
         meta = next((f for f in files_data if f['filename'] == node_name), None)
         final_nodes.append(meta if meta else {"id": node_name, "filename": node_name, "folder": "External", "risk_score": 0})
 
-
-
-
     store_graph_data(session_id, final_nodes, relationships)
-
-
-
 
     db.session.execute(
     db.text("""
@@ -643,26 +659,14 @@ def process_visualization_upload():
     db.session.commit()
 
 
-
-
     # Step D: Insights
     insights = generate_internal_insights(files_data)
     with open(os.path.join(graph_folder, "insights.json"), "w", encoding="utf-8") as f:
         json.dump(insights, f)
 
-
-
-
     # Step E: Graph HTML
     html_filename = "graph.html"
     generate_graph_html(session_id, os.path.join(graph_folder, html_filename))
-
-
-
-
-
-
-
 
     db.session.execute(
     db.text("""
@@ -674,13 +678,7 @@ def process_visualization_upload():
     )
     db.session.commit()
 
-
-
-
     graph_url = f"{BASE_URL}/graphs/{rel_path.replace(os.sep, '/')}/{html_filename}"
-
-
-
 
     upload_entry = Upload(
         project_id=new_project.id,
@@ -692,14 +690,8 @@ def process_visualization_upload():
         # relationships=relationships
     )
 
-
-
-
     db.session.add(upload_entry)
     db.session.commit()
-
-
-
 
     return api_response("Visualization Generated", {
     "project_id": new_project.id,
@@ -713,25 +705,59 @@ def process_visualization_upload():
     }, 200)
 
 
+def compute_project_baseline(files_data):
+    total_files = len(files_data)
+    total_lines = sum(f["lines_of_code"] for f in files_data)
+
+    avg_lines = total_lines / max(1, total_files)
+    avg_functions = (
+        sum(f["content"].count("def ") for f in files_data)
+        / max(1, total_files)
+    )
+
+    return {
+        "total_files": total_files,
+        "total_lines": total_lines,
+        "avg_lines_per_file": avg_lines,
+        "avg_functions_per_file": avg_functions
+    }
 
 
-def analyze_file_metrics(content, lines):
-    readability = max(1, min(5, 5 - (lines / 300)))
-    modularity = max(1, min(5, content.count("def ") / 5))
+def analyze_file_metrics(content, lines, baseline):
+
+    # ---------- MODULARITY (dynamic) ----------
+    func_count = content.count("def ")
+    expected = baseline["avg_functions_per_file"] or 1
+    modularity = max(1, min(5, (func_count / expected) * 3))
+
+    # ---------- READABILITY ----------
+    readability = max(
+        1,
+        min(5, 5 - (lines / (baseline["avg_lines_per_file"] * 2)))
+    )
+
+    # ---------- SECURITY ----------
     security_risk = sum(
         content.count(x) for x in ["eval(", "exec(", "pickle", "os.system"]
     )
     security = max(1, 5 - security_risk)
 
+    # ---------- RELIABILITY (dynamic) ----------
+    reliability_signals = (
+        content.count("try:") +
+        content.count("except") +
+        content.count("raise") +
+        content.count("assert")
+    )
+    reliability = max(1, min(5, reliability_signals + 1))
 
+    # ---------- PERFORMANCE ----------
+    loops = content.count("for ") + content.count("while ")
+    performance = max(1, min(5, 5 - (loops / 5)))
 
-
-    reliability = min(5, content.count("try:") + 1)
-    performance = max(1, 5 - content.count("for ") * 0.3)
-    size_health = max(1, 5 - (lines / 500))
-
-
-
+    # ---------- SIZE HEALTH ----------
+    size_ratio = lines / (baseline["avg_lines_per_file"] * 2)
+    size_health = max(1, min(5, 5 - size_ratio))
 
     return {
         "readability": round(readability, 2),
@@ -741,8 +767,6 @@ def analyze_file_metrics(content, lines):
         "performance": round(performance, 2),
         "sizeHealth": round(size_health, 2)
     }
-
-
 
 
 def calculate_code_health(files_data):

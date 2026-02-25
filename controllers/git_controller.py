@@ -1,7 +1,8 @@
 import os
 import json
+import shlex
+import subprocess
 import uuid
-
 from flask import request, jsonify
 from models import db, User, Project, FileAnalysis, Upload
 from utils.response import api_response
@@ -13,14 +14,31 @@ from services.git_service import (
     push_git_repo,
     list_branches,
     checkout_branch,
+    resolve_repo_path,
 )
 from controllers.visualization_controller import (
     PythonAnalyzer,
+    compute_project_baseline,
+    generate_health_explanations,
     get_chroma_client,
     analyze_file_metrics,
     calculate_code_health,
     generate_internal_insights,
 )
+
+# -----------------------------
+# HELPER: Get Folder Size
+# -----------------------------
+def get_folder_size(folder_path):
+    total = 0
+    for root, dirs, files in os.walk(folder_path):
+        for f in files:
+            try:
+                fp = os.path.join(root, f)
+                total += os.path.getsize(fp)
+            except:
+                continue
+    return total
 
 
 # ─────────────────────────────────────────────
@@ -114,6 +132,30 @@ def initiate_git_upload():
     if clone_result.get("statusCode") != 201:
         return api_response("Failed to clone repository", clone_result, 500)
 
+    # -----------------------------
+    # PLAN-BASED SIZE LIMIT  ← OUTSIDE IF
+    # -----------------------------
+    plan = str(getattr(user, "subscription_tier", "FREE")).upper()
+
+    if plan == "PREMIUM":
+        max_size_bytes = 20 * 1024 * 1024   # 20 MB
+    else:
+        max_size_bytes = 10 * 1024          # 10 KB
+
+    repo_path = os.path.join(UPLOAD_FOLDER, str(user_id), session_id, "extracted")
+
+    repo_size = get_folder_size(repo_path)
+
+    if repo_size > max_size_bytes:
+        import shutil
+        shutil.rmtree(repo_path, ignore_errors=True)
+
+        return api_response(
+            f"Repository exceeds your plan limit.Please Upgrade Your Plan",
+            None,
+            400
+        )
+
     # ── List available branches ──────────────────────────────────────────────
     branch_result = list_branches(user_id, session_id)
     branches        = branch_result.get("branches", [])
@@ -146,7 +188,6 @@ def initiate_git_upload():
         },
         200
     )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STEP 2 — Switch branch (if needed) then run full analysis
@@ -197,6 +238,25 @@ def select_branch_and_analyze():
     if checkout_result.get("statusCode") != 200:
         return api_response("Failed to switch branch", checkout_result, 500)
 
+    # -----------------------------
+    # PLAN-BASED SIZE CHECK
+    # -----------------------------
+    plan = str(getattr(user, "subscription_tier", "FREE")).upper()
+
+    if plan == "PREMIUM":
+        max_size_bytes = 20 * 1024 * 1024   # 20 MB
+    else:
+        max_size_bytes = 10 * 1024          # 10 KB
+
+        repo_size = get_folder_size(extracted_path)
+
+    if repo_size > max_size_bytes:
+        return api_response(
+            f"Repository exceeds your plan limit.Please Upgrade Your Plan",
+            None,
+            400
+        )
+
     # ── Analysis Pipeline ────────────────────────────────────────────────────
     analyzer       = PythonAnalyzer()
     relationships  = []
@@ -231,7 +291,6 @@ def select_branch_and_analyze():
                 unique_nodes.add(rel_file)
 
             risk    = min(100, int((content.count("if ") + content.count("for ")) * 1.5))
-            metrics = analyze_file_metrics(content, lines)
             ext     = os.path.splitext(f)[1].lower()
 
             files_data.append({
@@ -241,7 +300,6 @@ def select_branch_and_analyze():
                 "folder":       os.path.dirname(rel_file) or "Root",
                 "lines_of_code": lines,
                 "risk_score":   risk,
-                "metrics":      metrics,
                 "content":      content
             })
 
@@ -277,18 +335,63 @@ def select_branch_and_analyze():
     )
     db.session.commit()
 
-    code_health = calculate_code_health(files_data)
+    if files_data:
+        baseline = compute_project_baseline(files_data)
+
+        for f in files_data:
+            f["metrics"] = analyze_file_metrics(
+                f["content"],
+                f["lines_of_code"],
+                baseline
+            )
+
+        code_health = calculate_code_health(files_data)
+    else:
+        code_health = None
+
+
+    
+    #  ADD THIS BLOCK (same as normal upload)
+    if code_health and "ratings" in code_health:
+        explanations = generate_health_explanations(files_data, code_health["ratings"])
+
+        enhanced_ratings = {}
+        for key, score in code_health["ratings"].items():
+            ai_data = explanations.get(key, {})
+            enhanced_ratings[key] = {
+                "score": score,
+                "reason": ai_data.get("reason", "Analysis pending."),
+                "suggestion": ai_data.get("suggestion", ""),
+                "affected_files": ai_data.get("affected_files", []),
+                "impact": ai_data.get("impact", "")
+            }
+
+        code_health["ratings"] = enhanced_ratings
+
+
     insights    = generate_internal_insights(files_data)
 
-    upload_entry = Upload(
+    upload_entry = Upload.query.filter_by(
         project_id=new_project.id,
-        session_id=session_id,
-        codeHealth=code_health,
-        files=files_data,
-        insights=insights
-    )
-    db.session.add(upload_entry)
+        session_id=session_id
+    ).first()
+
+    if upload_entry:
+        upload_entry.codeHealth = code_health
+        upload_entry.files = files_data
+        upload_entry.insights = insights
+    else:
+        upload_entry = Upload(
+            project_id=new_project.id,
+            session_id=session_id,
+            codeHealth=code_health,
+            files=files_data,
+            insights=insights
+        )
+        db.session.add(upload_entry)
+
     db.session.commit()
+
 
     # Mark statuses as DONE
     for col in ("code_health_status", "api_analysis_status",
@@ -308,3 +411,64 @@ def select_branch_and_analyze():
         },
         200
     )
+
+
+# =====================================================
+# REST-BASED TERMINAL HANDLER
+# =====================================================
+
+ALLOWED_COMMANDS = ['git', 'ls', 'pwd', 'clear', 'echo']
+
+def terminal_api_handler():
+    """Handles terminal commands via standard HTTP POST (No WebSockets)."""
+    data = request.json or {}
+    user_id = data.get("user_id")
+    session_id = data.get("session_id")
+    command = data.get("command", "").strip()
+    
+    # Resolve local directory path
+    repo_path = resolve_repo_path(user_id, session_id)
+    
+    if not os.path.exists(repo_path):
+        return jsonify({"output": "Error: Repository path not found. Please clone first.\r\n"}), 404
+
+    if not command:
+        return jsonify({"output": ""}), 200
+
+    try:
+        # 1. Parse command into arguments
+        args = shlex.split(command)
+        if not args:
+            return jsonify({"output": ""}), 200
+            
+        base_cmd = args[0]
+
+        # 2. Security: Whitelist Check
+        if base_cmd not in ALLOWED_COMMANDS:
+            return jsonify({"output": f"Access Denied: Command '{base_cmd}' is restricted.\r\n"}), 403
+        
+        # 3. Security: Prevent Directory Traversal
+        if ".." in command:
+            return jsonify({"output": "Access Denied: Path traversal not allowed.\r\n"}), 403
+
+        # 4. Execute the command
+        process = subprocess.run(
+            args, 
+            cwd=repo_path, 
+            capture_output=True, 
+            text=True, 
+            timeout=15  # Prevents long-hanging commands
+        )
+        
+        # Combine Standard Output and Errors
+        result = process.stdout + process.stderr
+        
+        # Format for Xterm.js (convert newlines to carriage returns)
+        formatted_result = result.replace("\n", "\r\n")
+        
+        return jsonify({"output": formatted_result}), 200
+
+    except subprocess.TimeoutExpired:
+        return jsonify({"output": "Error: Command timed out after 15 seconds.\r\n"}), 504
+    except Exception as e:
+        return jsonify({"output": f"Execution Error: {str(e)}\r\n"}), 500
