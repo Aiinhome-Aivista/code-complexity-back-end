@@ -1,5 +1,3 @@
-
-
 import re
 import os
 import ast
@@ -10,10 +8,10 @@ import chromadb
 from google import genai
 from flask import request
 from models import Upload
-from services.git_service import clone_git_repo
 from utils.response import api_response
 from werkzeug.utils import secure_filename
 from utils.file_utils import handle_zip_upload
+from services.git_service import clone_git_repo
 from models import db, User, Project, FileAnalysis
 from services.ml_service import get_embedding_model
 from services.arango_service import store_graph_data, generate_graph_html
