@@ -117,10 +117,15 @@ def generate_insights():
 def generate_visualization(): 
     return visualization_controller.process_visualization_upload()
 
-# Git repository upload
+# Git repository upload — Step 1: clone only, return branch list
 @app.route(VIZ_URL + '/upload_git', methods=['POST'])
 def generate_visualization_from_git():
-    return visualization_controller.process_git_upload()    
+    return git_controller.initiate_git_upload()
+
+# Git repository upload — Step 2: select branch → analyse
+@app.route(VIZ_URL + '/select_branch', methods=['POST'])
+def select_branch_and_analyze():
+    return git_controller.select_branch_and_analyze()
 
 
 @app.route(ANALYSIS_URL + '/analyze_project_ai', methods=['POST'])

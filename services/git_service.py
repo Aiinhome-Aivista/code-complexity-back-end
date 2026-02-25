@@ -165,3 +165,80 @@ def push_git_repo(user_id, session_id, commit_message="Update from API"):
         return {"statusCode": 200, "status": "success", "message": "No changes to push"}
     except Exception as e:
         return {"statusCode": 500, "status": "error", "message": f"Push Error: {str(e)}"}
+
+
+def list_branches(user_id, session_id):
+    """
+    Returns all available remote branches for the cloned repo.
+    """
+    try:
+        target_dir = resolve_repo_path(user_id, session_id)
+        err = _validate_local_git_path(target_dir)
+        if err:
+            return err
+
+        repo = Repo(target_dir)
+        branches = [ref.remote_head for ref in repo.remotes.origin.refs
+                    if ref.remote_head != "HEAD"]
+        return {
+            "statusCode": 200,
+            "status": "success",
+            "branches": branches,
+            "current_branch": repo.active_branch.name
+        }
+    except Exception as e:
+        return {"statusCode": 500, "status": "error", "message": f"List Branches Error: {str(e)}"}
+
+
+def checkout_branch(user_id, session_id, branch):
+    """
+    Checks whether `branch` exists on origin.
+    If yes, switches to it and pulls the latest files.
+    Returns a result dict.
+    """
+    try:
+        target_dir = resolve_repo_path(user_id, session_id)
+        err = _validate_local_git_path(target_dir)
+        if err:
+            return err
+
+        repo = Repo(target_dir)
+
+        # Refresh remote refs (re-auth if token available)
+        creds = _get_user_git_credentials(user_id)
+        if creds and creds.get("git_token"):
+            auth_url = _prepare_authenticated_url(repo.remotes.origin.url, creds["git_token"])
+            repo.remotes.origin.set_url(auth_url)
+        repo.remotes.origin.fetch()
+
+        # Check if branch exists remotely
+        remote_branches = [ref.remote_head for ref in repo.remotes.origin.refs
+                           if ref.remote_head != "HEAD"]
+        if branch not in remote_branches:
+            return {
+                "statusCode": 404,
+                "status": "error",
+                "message": f"Branch '{branch}' does not exist in the remote repository.",
+                "available_branches": remote_branches
+            }
+
+        # Checkout (create local tracking branch if not already present)
+        local_branch_names = [b.name for b in repo.branches]
+        if branch in local_branch_names:
+            repo.git.checkout(branch)
+        else:
+            repo.git.checkout("-b", branch, f"origin/{branch}")
+
+        # Pull latest
+        repo.remotes.origin.pull(branch)
+
+        return {
+            "statusCode": 200,
+            "status": "success",
+            "message": f"Switched to branch '{branch}' and updated files.",
+            "branch": branch
+        }
+    except GitCommandError as e:
+        return {"statusCode": 500, "status": "error", "message": f"Git Error: {str(e)}"}
+    except Exception as e:
+        return {"statusCode": 500, "status": "error", "message": f"Checkout Error: {str(e)}"}
