@@ -241,14 +241,15 @@ def select_branch_and_analyze():
     # -----------------------------
     # PLAN-BASED SIZE CHECK
     # -----------------------------
+
     plan = str(getattr(user, "subscription_tier", "FREE")).upper()
 
     if plan == "PREMIUM":
-        max_size_bytes = 20 * 1024 * 1024   # 20 MB
+        max_size_bytes = 20 * 1024 * 1024
     else:
-        max_size_bytes = 10 * 1024          # 10 KB
+        max_size_bytes = 10 * 1024
 
-        repo_size = get_folder_size(extracted_path)
+    repo_size = get_folder_size(extracted_path)
 
     if repo_size > max_size_bytes:
         return api_response(
@@ -256,6 +257,8 @@ def select_branch_and_analyze():
             None,
             400
         )
+
+
 
     # ── Analysis Pipeline ────────────────────────────────────────────────────
     analyzer       = PythonAnalyzer()

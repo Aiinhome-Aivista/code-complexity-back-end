@@ -1,6 +1,6 @@
 from flask import jsonify
-from models import Plan, UserSubscription, db
 from datetime import datetime
+from models import Plan, UserSubscription, db
 
 def serialize_plan(plan, status=None, days_remaining=None):
     """Helper to format plan data consistently."""

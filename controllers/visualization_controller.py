@@ -6,6 +6,7 @@ import uuid
 import json
 import requests
 import chromadb
+import statistics
 from google import genai
 from flask import request
 from models import Upload
@@ -727,8 +728,17 @@ def analyze_file_metrics(content, lines, baseline):
 
     # ---------- MODULARITY (dynamic) ----------
     func_count = content.count("def ")
-    expected = baseline["avg_functions_per_file"] or 1
-    modularity = max(1, min(5, (func_count / expected) * 3))
+    class_count = content.count("class ")
+
+    structure_units = func_count + class_count
+
+    if structure_units == 0:
+        modularity = 1
+    else:
+        density = structure_units / max(1, lines)
+        modularity = min(5, max(1, density * 150))
+
+
 
     # ---------- READABILITY ----------
     readability = max(
@@ -743,13 +753,14 @@ def analyze_file_metrics(content, lines, baseline):
     security = max(1, 5 - security_risk)
 
     # ---------- RELIABILITY (dynamic) ----------
-    reliability_signals = (
-        content.count("try:") +
-        content.count("except") +
-        content.count("raise") +
-        content.count("assert")
-    )
-    reliability = max(1, min(5, reliability_signals + 1))
+    error_handling = content.count("try") + content.count("except")
+    validation = content.count("if ") + content.count("raise")
+    logging = content.count("logger") + content.count("logging.")
+
+    signal = error_handling * 2 + validation + logging * 0.5
+    reliability = min(5, max(1, signal / 5))
+
+
 
     # ---------- PERFORMANCE ----------
     loops = content.count("for ") + content.count("while ")
@@ -793,12 +804,26 @@ def calculate_code_health(files_data):
     ratings = {k: round(v / count, 1) for k, v in totals.items()}
 
 
-    avg = sum(ratings.values()) / 6
-    overall = round(avg * 20, 0)
+    values = list(ratings.values())
+
+    mean_score = statistics.mean(values)
+    std_dev = statistics.pstdev(values)
+
+    # Penalize inconsistency
+    consistency_penalty = std_dev * 5
+
+    # Penalize weak metrics
+    weakness_penalty = sum(1 for v in values if v < 2.5) * 5
+
+    overall = (mean_score * 20) - consistency_penalty - weakness_penalty
+    overall = max(0, min(100, round(overall)))
+
 
 
     strengths = [k for k, v in ratings.items() if v >= 4]
-    weaknesses = [k for k, v in ratings.items() if v <= 2]
+    weaknesses = [k for k, v in ratings.items() if v < 2.5]
+
+
 
 
     #  OVERALL SCORE EXPLANATION

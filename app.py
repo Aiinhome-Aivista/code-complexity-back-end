@@ -1,11 +1,11 @@
 import os
-from flask import Flask, send_from_directory, request
 from flask_cors import CORS
-from urllib.parse import quote_plus
 from extensions import db, mail
-from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER, Config
-from services.subscription_service import upgrade_to_premium 
+from urllib.parse import quote_plus
+from flask import Flask, send_from_directory, request, abort
 from flask_login import current_user , login_required
+from services.subscription_service import upgrade_to_premium 
+from config import MYSQL_CONFIG, UPLOAD_FOLDER, GRAPH_FOLDER, Config
 # -------------------------------
 # Create App
 # -------------------------------
@@ -73,17 +73,27 @@ os.makedirs(GRAPH_FOLDER, exist_ok=True)
 def serve_extracted_file(user_id, session_id, filename):
     base_dir = os.path.join(UPLOAD_FOLDER, str(user_id), session_id, 'extracted')
     full_path = os.path.join(base_dir, filename)
+
+    # Direct path match
     if os.path.exists(full_path):
         return send_from_directory(os.path.dirname(full_path), os.path.basename(full_path))
 
+    # Search inside extracted folder
     search_filename = os.path.basename(filename)
     for root, dirs, files in os.walk(base_dir):
         if search_filename in files:
             return send_from_directory(root, search_filename)
 
+    # Search session root
     session_root = os.path.join(UPLOAD_FOLDER, str(user_id), session_id)
-    if os.path.exists(os.path.join(session_root, search_filename)):
+    possible_path = os.path.join(session_root, search_filename)
+
+    if os.path.exists(possible_path):
         return send_from_directory(session_root, search_filename)
+
+    #  FINAL FALLBACK (VERY IMPORTANT)
+    return abort(404, description="File not found")
+
 
 @app.route('/graphs/<path:filename>')
 def serve_graph_files(filename):

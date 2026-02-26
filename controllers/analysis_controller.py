@@ -1,4 +1,3 @@
-
 import os
 import uuid
 import json
@@ -404,8 +403,10 @@ def apply_ai_fix():
             f.write(updated_content)
 
         # -----------------------------
-        # 2. UPDATE FileAnalysis.issues_json  ✅ THIS WAS MISSING
+        # 2. UPDATE FileAnalysis.issues_json
         # -----------------------------
+        updated_issues = []  #  initialize first
+
         project = Project.query.filter_by(
             user_id=user_id,
             session_id=session_id
@@ -420,7 +421,6 @@ def apply_ai_fix():
             if file_record:
                 issues = json.loads(file_record.issues_json or "[]")
 
-                # 🔥 REMOVE the fixed issue
                 updated_issues = [
                     issue for issue in issues
                     if issue.get("original_snippet") != original_snippet
@@ -428,6 +428,8 @@ def apply_ai_fix():
 
                 file_record.issues_json = json.dumps(updated_issues)
                 db.session.commit()
+
+
 
         # -----------------------------
         # 3. OPTIONAL: TRACK APPLIED FIX

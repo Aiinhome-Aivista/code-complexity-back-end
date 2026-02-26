@@ -18,6 +18,28 @@ AI_HEATMAP_CACHE = {}
 # ✅ Supported metrics
 SUPPORTED_METRICS = ["complexity", "security", "performance", "size"]
 
+#  Files to ignore in AI scoring
+SKIP_FILES = {
+    ".gitignore",
+    "README.md",
+    "README",
+    "requirements.txt",
+    "package-lock.json",
+    "yarn.lock",
+    "Pipfile",
+    "Pipfile.lock"
+}
+
+#  Extensions to ignore
+SKIP_EXTENSIONS = {
+    ".md",
+    ".txt",
+    ".lock",
+    ".log"
+}
+
+
+
 # ===============================
 # Gemini Client (lazy safe)
 # ===============================
@@ -153,41 +175,66 @@ def ai_score_file_fallback(prompt: str):
 # ===============================
 #  AI HEATMAP API (SINGLE ROUTE)
 # ===============================
+METRIC_WEIGHTS = {
+    "complexity": 1.2,
+    "security": 1.5,
+    "performance": 1.0,
+    "size": 0.8
+}
+
 def code_risk_heatmap():
     try:
         payload = request.get_json() or {}
         project_id = payload.get("project_id")
         session_id = payload.get("session_id")
-        force_refresh = payload.get("force", False) # Clear specific cache via request
+        requested_metrics = payload.get("metrics", SUPPORTED_METRICS)
+        force_refresh = payload.get("force", False)
 
         if not project_id or not session_id:
-            return api_response("project_id and session_id are required", None, 400)
+            return api_response("project_id and session_id required", None, 400)
 
         project = Project.query.get(project_id)
-        upload = Upload.query.filter_by(project_id=project_id, session_id=session_id).first()
+        upload = Upload.query.filter_by(
+            project_id=project_id,
+            session_id=session_id
+        ).first()
 
         if not project or not upload:
-            return api_response("Project or Upload not found", None, 404)
-
-        # 🛑 CACHE CHECK: If force_refresh is True, we skip this and re-run the AI
-        if not force_refresh and upload.heatmap and upload.heatmap.get("metrics"):
-            # Check if existing data actually has our new field
-            first_metric = SUPPORTED_METRICS[0]
-            files_list = upload.heatmap["metrics"].get(first_metric, {}).get("files", [])
-            if files_list and "suggested_lines" in files_list[0]:
-                project.heatmap_status = "DONE"
-                db.session.commit()
-                return api_response("AI Heatmap (Cached)", upload.heatmap, 200)
+            return api_response("Project not found", None, 404)
 
         project.heatmap_status = "PENDING"
         db.session.commit()
 
         files = upload.files or []
         final_heatmap = {}
+        project_summary = {}
 
-        for metric in SUPPORTED_METRICS:
+        overall_scores = []
+
+        for metric in requested_metrics:
+
+            if metric not in SUPPORTED_METRICS:
+                continue
+
             heatmap_files = []
+
             for f in files:
+
+                filename = f.get("filename", "")
+                extension = ""
+
+                if "." in filename:
+                    extension = "." + filename.split(".")[-1].lower()
+
+                #  Skip unwanted files
+                if (
+                    filename in SKIP_FILES
+                    or extension in SKIP_EXTENSIONS
+                    or filename.startswith(".")
+                ):
+                    continue
+
+
                 cache_key = f"{project_id}:{session_id}:{metric}:{f.get('filename')}"
 
                 if not force_refresh and cache_key in AI_HEATMAP_CACHE:
@@ -196,13 +243,23 @@ def code_risk_heatmap():
                     ai_result = ai_score_file(f.get("content", ""), metric)
                     AI_HEATMAP_CACHE[cache_key] = ai_result
 
-                score = int(ai_result.get("risk", 0))
-                score = max(0, min(100, score))
+                raw_score = int(ai_result.get("risk", 0))
+                raw_score = max(0, min(100, raw_score))
+
+                weighted_score = int(raw_score * METRIC_WEIGHTS.get(metric, 1))
+                weighted_score = min(weighted_score, 100)
+
+                density = 0
+                if f.get("lines_of_code", 0) > 0:
+                    density = round(weighted_score / f["lines_of_code"], 2)
+
+                overall_scores.append(weighted_score)
 
                 heatmap_files.append({
                     "filename": f.get("filename"),
-                    "risk": score,
-                    "risk_level": resolve_risk_level(score),
+                    "risk": weighted_score,
+                    "risk_level": resolve_risk_level(weighted_score),
+                    "risk_density": density,
                     "reason": ai_result.get("reason", ""),
                     "solution": ai_result.get("solution", ""),
                     "suggested_code": ai_result.get("suggested_code", ""),
@@ -210,14 +267,39 @@ def code_risk_heatmap():
                     "lines": f.get("lines_of_code", 0)
                 })
 
+            #  Sort by risk descending
+            heatmap_files.sort(key=lambda x: x["risk"], reverse=True)
+
             final_heatmap[metric] = {
                 "legend": {
-                    "safe": "0-19", "low": "20-39", "moderate": "40-59", "high": "60-79", "critical": "80-100"
+                    "safe": "0-19",
+                    "low": "20-39",
+                    "moderate": "40-59",
+                    "high": "60-79",
+                    "critical": "80-100"
                 },
                 "files": heatmap_files
             }
 
-        heatmap_data = {"metrics": final_heatmap}
+        #  PROJECT LEVEL SUMMARY
+        if overall_scores:
+            avg_risk = int(sum(overall_scores) / len(overall_scores))
+            critical_count = len([s for s in overall_scores if s >= 80])
+            high_count = len([s for s in overall_scores if s >= 60])
+
+            project_summary = {
+                "overall_risk_score": avg_risk,
+                "overall_risk_level": resolve_risk_level(avg_risk),
+                "critical_files": critical_count,
+                "high_risk_files": high_count,
+                "total_files": len(files)
+            }
+
+        heatmap_data = {
+            "summary": project_summary,
+            "metrics": final_heatmap
+        }
+
         upload.heatmap = heatmap_data
         project.heatmap_status = "DONE"
         db.session.commit()
@@ -227,4 +309,5 @@ def code_risk_heatmap():
     except Exception as e:
         print("AI Heatmap Error:", e)
         return api_response("Internal Server Error", None, 500)
+
 

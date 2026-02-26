@@ -1,14 +1,13 @@
-
 import os
-import json
 import re
+import json
 import uuid
+import google as genai
 from flask import request
+from utils.response import api_response
 from models import db, Project, FileAnalysis, Upload
 from config import GRAPH_FOLDER, GEMINI_API_KEY, BASE_URL
-from utils.response import api_response
 from services.arango_service import get_graph_from_arango
-import google as genai
 
 
 # Configure AI

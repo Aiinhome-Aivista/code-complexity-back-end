@@ -1,32 +1,6 @@
-# from flask import request
-# from models import db, User
-# from utils.response import api_response
-# from werkzeug.security import generate_password_hash, check_password_hash
-
-# def register():
-#     data = request.json
-#     if not data or 'email' not in data: 
-#         return api_response("Invalid data", None, 400)
-#     if User.query.filter_by(email=data['email']).first(): 
-#         return api_response("Email exists", None, 400)
-    
-#     new_user = User(
-#         name=data.get('name', 'User'), email=data['email'], 
-#         password_hash=generate_password_hash(data['password']), subscription_tier='free'
-#     )
-#     db.session.add(new_user)
-#     db.session.commit()
-#     return api_response("Registered", None, 200)
-
-# def login():
-#     data = request.json
-#     user = User.query.filter_by(email=data.get('email')).first()
-#     if user and check_password_hash(user.password_hash, data.get('password')):
-#         return api_response("Success", {"id": user.id, "name": user.name, "email": user.email, "tier": user.subscription_tier}, 200)
-#     return api_response("Invalid credentials", None, 401)
-
 from models import User
 from flask import session
+from flask import current_app
 from flask_mail import Message
 from extensions import db, mail
 from utils.response import api_response
@@ -35,6 +9,8 @@ from flask import request, url_for, current_app
 from services.captcha_service import generate_math_captcha
 from utils.token import generate_confirmation_token, confirm_token
 from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+
 
 # --- HELPER FUNCTION FOR EMAILS ---
 def send_email(to, subject, template):
@@ -48,10 +24,16 @@ def send_email(to, subject, template):
     mail.send(msg)
 
 def get_captcha():
-    """Endpoint to call before login to get a challenge"""
     captcha_data = generate_math_captcha()
-    session['captcha_answer'] = captcha_data['answer']
-    return api_response("Captcha generated", {"question": captcha_data['question']}, 200)
+
+    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+    token = serializer.dumps(captcha_data['answer'])
+
+    return api_response("Captcha generated", {
+    "question": captcha_data['question'],
+    "captcha_token": token
+    }, 200)
+
 
 def register():
     data = request.json
@@ -121,30 +103,42 @@ def activate_account(token):
 
 def login():
     data = request.json
-    
-    # 1. CAPTCHA Validation (Added)
-    user_captcha_guess = data.get('captcha')
-    actual_answer = session.pop('captcha_answer', None)
 
-    if not actual_answer or str(user_captcha_guess) != actual_answer:
-        return api_response("Invalid or expired CAPTCHA", None, 400)
+    # 1️⃣ CAPTCHA Validation (Modified - Stateless)
+    user_captcha_guess = str(data.get('captcha'))
+    captcha_token = data.get('captcha_token')
 
-    # 2. Credential Validation (Existing logic)
+    serializer = URLSafeTimedSerializer(current_app.config['SECRET_KEY'])
+
+    try:
+        # 120 seconds expiry
+        actual_answer = serializer.loads(captcha_token, max_age=120)
+    except SignatureExpired:
+        return api_response("CAPTCHA expired. Please refresh.", None, 400)
+    except BadSignature:
+        return api_response("Invalid CAPTCHA token", None, 400)
+
+    if user_captcha_guess != actual_answer:
+        return api_response("Invalid CAPTCHA", None, 400)
+
+    # 2️⃣ Credential Validation (UNCHANGED - your old logic)
     user = User.query.filter_by(email=data.get('email')).first()
     
     if user and check_password_hash(user.password_hash, data.get('password')):
-        # Account Activation Check
         if not user.is_active:
-            return api_response("Please activate your account via the link sent to your email.", None, 403)
-        
-        # Clear captcha after successful use (Added)
-        session.pop('captcha_answer', None)
+            return api_response(
+                "Please activate your account via the link sent to your email.", 
+                None, 
+                403
+            )
             
         return api_response("Login Successful", {
-            "id": user.id, 
-            "name": user.name, 
-            "email": user.email, 
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
             "tier": user.subscription_tier
         }, 200)
-        
-    return api_response("Invalid credentials", None, 401)   
+
+    return api_response("Invalid credentials", None, 401)
+
+    
